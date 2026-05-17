@@ -1,6 +1,6 @@
 {
-  "name": "SIAPMA MTsN 2 Bombana",
-  "short_name": "SIAPMA",
+  "name": "SIGAP MTsN 2 Bombana",
+  "short_name": "SIGAP",
   "description": "Sistem Informasi dan Absensi Pelajar Madrasah MTsN 2 Bombana",
   "start_url": "/",
   "display": "standalone",

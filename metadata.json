@@ -1,5 +1,5 @@
 {
-  "name": "Remix: SIAPMA MTsN 2 Bombana",
+  "name": "SIGAP MTsN 2 Bombana",
   "description": "Sistem Informasi dan Absensi Pelajar Madrasah untuk MTsN 2 Bombana dengan fitur absensi siswa, guru, dan manajemen data madrasah.",
   "requestFramePermissions": [
     "camera"
