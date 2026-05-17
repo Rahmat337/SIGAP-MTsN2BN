@@ -22,7 +22,7 @@ import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as htmlToImage from 'html-to-image';
-import { QRCodeCanvas } from 'qrcode.react';
+import { QRCodeSVG } from 'qrcode.react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   Legend, AreaChart, Area
@@ -142,6 +142,16 @@ export default function App() {
     rekapMapel: 0
   });
   const [pageSize, setPageSize] = useState(10);
+  const [currentDate, setCurrentDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // Timer to ensure "Today" updates if page is left open overnight
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const live = new Date().toISOString().split('T')[0];
+      if (live !== currentDate) setCurrentDate(live);
+    }, 60000); // Check every minute
+    return () => clearInterval(timer);
+  }, [currentDate]);
 
   const [rekapMapelFilter, setRekapMapelFilter] = useState({
     nip: '',
@@ -172,7 +182,6 @@ export default function App() {
 
     // Real-time synchronization
     const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => {
-      console.log(`[DEBUG] Fetched ${snap.docs.length} students`);
       setStudents(snap.docs.map(d => {
         const data = d.data();
         return { nisn: d.id, ...data } as Student;
@@ -180,7 +189,6 @@ export default function App() {
     }, (error) => handleFirestoreError(error, OperationType.GET, 'students'));
 
     const unsubTeachers = onSnapshot(collection(db, 'teachers'), (snap) => {
-      console.log(`[DEBUG] Fetched ${snap.docs.length} teachers`);
       setTeachers(snap.docs.map(d => {
         const data = d.data();
         return { nip: d.id, ...data } as Teacher;
@@ -214,10 +222,7 @@ export default function App() {
     const unsubAppConfig = onSnapshot(doc(db, 'appConfig', 'general'), (snap) => {
       if (snap.exists()) {
         const data = snap.data() as AppConfig;
-        console.log("[DEBUG] appConfig updated:", data);
         setAppConfig(data);
-      } else {
-        console.log("[DEBUG] appConfig document does not exist yet");
       }
     }, (error) => handleFirestoreError(error, OperationType.GET, 'appConfig/general'));
 
@@ -235,13 +240,28 @@ export default function App() {
   }, [firebaseConnected]);
 
   const stats: DashboardStats & { siswaL?: number, siswaP?: number, sakitCount?: number, izinCount?: number, alfaCount?: number } = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const today = currentDate; // Use the state-synced date
+    const dayMap = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+    const dayName = dayMap[now.getDay()];
+    
+    const isHoliday = holidays.some(h => h.tanggal === today) || dayName === 'Minggu';
+
     const todayAttendance = attendance.filter(a => a.tanggal === today);
     const hadir = todayAttendance.filter(a => a.status === 'Hadir').length;
     const lambat = todayAttendance.filter(a => a.terlambat > 0).length;
     const sakit = todayAttendance.filter(a => a.status === 'Sakit').length;
     const izin = todayAttendance.filter(a => a.status === 'Izin').length;
-    const alfa = todayAttendance.filter(a => a.status === 'Alfa').length;
+    
+    // ALFA Logic: 
+    // 1. Those recorded as 'Alfa' in DB (e.g. check-in after school hours)
+    const recordedAlfa = todayAttendance.filter(a => a.status === 'Alfa').length;
+    
+    // 2. Those who haven't checked in at all today
+    const attendedNisns = new Set(todayAttendance.map(a => a.nisn));
+    const notYetCheckedIn = students.length - attendedNisns.size;
+
+    const alfaTotal = isHoliday ? 0 : (recordedAlfa + notYetCheckedIn);
 
     const siswaL = students.filter(s => s.jenisKelamin === 'L' || s.jenisKelamin === 'Laki-Laki').length;
     const siswaP = students.filter(s => s.jenisKelamin === 'P' || s.jenisKelamin === 'Perempuan').length;
@@ -253,10 +273,23 @@ export default function App() {
       d.setDate(d.getDate() - i);
       const dateStr = d.toISOString().split('T')[0];
       const dayData = attendance.filter(a => a.tanggal === dateStr);
+      const dayHadir = dayData.filter(a => a.status === 'Hadir').length;
+      
+      // Daily Alfa calculation for chart too?
+      // For chart, we use the same "Missing" logic for realistic data
+      const dDayMap = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+      const dDayName = dDayMap[d.getDay()];
+      const dIsHoliday = holidays.some(h => h.tanggal === dateStr) || dDayName === 'Minggu';
+      
+      const dAttendedNisns = new Set(dayData.map(a => a.nisn));
+      const dNotYet = students.length - dAttendedNisns.size;
+      const dRecordedAlfa = dayData.filter(a => a.status === 'Alfa').length;
+      const dAlfaTotal = dIsHoliday ? 0 : (dNotYet + dRecordedAlfa);
+
       chartData.push({
         name: d.toLocaleDateString('id-ID', { weekday: 'short' }),
-        hadir: dayData.filter(a => a.status === 'Hadir').length,
-        alfa: dayData.filter(a => a.status === 'Alfa').length
+        hadir: dayHadir,
+        alfa: dAlfaTotal
       });
     }
 
@@ -267,12 +300,12 @@ export default function App() {
       terlambatHariIni: lambat,
       sakitCount: sakit,
       izinCount: izin,
-      alfaCount: alfa,
+      alfaCount: alfaTotal,
       chartData,
       siswaL,
       siswaP
     };
-  }, [students, teachers, attendance, settings]);
+  }, [students, teachers, attendance, settings, holidays]);
 
   const [refreshingDummy, setRefreshingDummy] = useState(false); // Just to satisfy UI
   
@@ -288,6 +321,29 @@ export default function App() {
 
   const [editingProfileData, setEditingProfileData] = useState<any>(null);
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+
+  // Optimized Maps for Rekap
+  const monthAttendanceMap = useMemo(() => {
+    const map: Record<string, Attendance[]> = {};
+    attendance.forEach(a => {
+      if (a.tanggal.startsWith(rekapFilter.bulan)) {
+        if (!map[a.nisn]) map[a.nisn] = [];
+        map[a.nisn].push(a);
+      }
+    });
+    return map;
+  }, [attendance, rekapFilter.bulan]);
+
+  const teacherAttendanceMap = useMemo(() => {
+    const map: Record<string, TeacherAttendance[]> = {};
+    teacherAttendance.forEach(ta => {
+      if (ta.tanggal.startsWith(rekapFilter.bulan)) {
+        if (!map[ta.nip]) map[ta.nip] = [];
+        map[ta.nip].push(ta);
+      }
+    });
+    return map;
+  }, [teacherAttendance, rekapFilter.bulan]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -616,15 +672,14 @@ export default function App() {
 
     // Capture original state
     const originalStyle = el.style.cssText;
-    const isHidden = el.classList.contains('hidden') || el.style.display === 'none' || el.classList.contains('opacity-0') || el.style.opacity === '0' || el.style.visibility === 'hidden';
     
-    // Temporarily make it visible for capture if it's hidden or scaled
-    // We force it to a specific size and remove transforms to ensure high-quality capture
+    // Temporarily make it visible and independent for capture
+    // We force it to be at the top level and fully visible without any transitions
     el.style.cssText += `
       position: fixed !important;
       top: 0 !important;
       left: 0 !important;
-      z-index: 999999 !important;
+      z-index: 9999999 !important;
       display: flex !important;
       visibility: visible !important;
       opacity: 1 !important;
@@ -640,73 +695,152 @@ export default function App() {
     `;
 
     try {
-      console.log(`Starting capture for #${elementId} using html-to-image...`);
+      console.log(`Starting capture for #${elementId}...`);
       
-      // Give it a moment to render in the new fixed position
-      await new Promise(resolve => setTimeout(resolve, 800));
+      // Delay to ensure the DOM has rendered the new styles and images
+      await new Promise(resolve => setTimeout(resolve, 1500));
       
-      // Wait for all images inside the element to load properly
+      // Force reload images with crossOrigin for CORS compatibility
       const images = Array.from(el.querySelectorAll('img'));
       await Promise.all(images.map(img => {
         if (img.complete && img.naturalWidth !== 0) return Promise.resolve();
         return new Promise(resolve => {
-          img.onload = resolve;
-          img.onerror = resolve;
-          // Crucial for CORS
           img.crossOrigin = "anonymous";
-          // Touch the src to re-trigger load with crossOrigin if needed
           const src = img.src;
-          img.src = "";
-          img.src = src;
+          if (src) {
+            img.src = ""; // Reset
+            img.src = src; // Re-trigger
+          }
+          img.onload = () => resolve(true);
+          img.onerror = () => resolve(false);
+          // Safety timeout for image loading
+          setTimeout(() => resolve(false), 3000);
         });
       }));
 
-      // Wait for any canvases to be ready (like QR codes)
-      const canvases = Array.from(el.querySelectorAll('canvas'));
-      // No specific wait needed for canvases usually, but just in case
-      
-      // Final delay for any complex CSS and fonts
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Additional small delay for layout stabilization
+      await new Promise(resolve => setTimeout(resolve, 300));
 
-      const dataUrl = await htmlToImage.toPng(el, {
-        pixelRatio: 2,
+      // Try html-to-image first
+      try {
+        const dataUrl = await htmlToImage.toPng(el, {
+          pixelRatio: 2,
+          backgroundColor: '#ffffff',
+          cacheBust: true,
+          style: {
+            transform: 'none',
+            visibility: 'visible',
+            display: 'flex',
+            opacity: '1',
+            margin: '0',
+            padding: '0'
+          }
+        });
+        
+        if (dataUrl && dataUrl.length > 500) { 
+          console.log("Capture with html-to-image successful.");
+          return dataUrl;
+        }
+      } catch (innerErr) {
+        console.warn("html-to-image failed, trying html2canvas...", innerErr);
+      }
+
+      // html2canvas fallback
+      const html2canvas = (await import('html2canvas')).default;
+      const canvas = await html2canvas(el, {
+        useCORS: true,
+        allowTaint: true,
         backgroundColor: '#ffffff',
-        cacheBust: true,
-        style: {
-          transform: 'none',
-          visibility: 'visible',
-          display: 'flex',
-          opacity: '1',
-          margin: '0',
-          padding: '0'
+        scale: 2,
+        logging: false,
+        onclone: (clonedDoc) => {
+          const win = clonedDoc.defaultView || window;
+          const clonedEl = clonedDoc.getElementById(elementId);
+          if (clonedEl) {
+             clonedEl.style.cssText += "transform: none !important; visibility: visible !important; display: flex !important; opacity: 1 !important; position: static !important; background: white !important;";
+             
+             // Recursively remove oklch/oklab from ALL stylesheets in the clone
+             // html2canvas parser crashes when it encounters these keywords anywhere
+             Array.from(clonedDoc.styleSheets).forEach(sheet => {
+               try {
+                 const rules = sheet.cssRules;
+                 for (let i = rules.length - 1; i >= 0; i--) {
+                   if (rules[i].cssText.includes('oklch') || rules[i].cssText.includes('oklab')) {
+                     sheet.deleteRule(i);
+                   }
+                 }
+               } catch (e) {
+                 // Cross-origin sheets might throw, so we fallback to fixing style tags
+               }
+             });
+
+             const styleTags = clonedDoc.querySelectorAll('style');
+             styleTags.forEach(tag => {
+               try {
+                 tag.innerHTML = tag.innerHTML.replace(/(oklch|oklab)\s*\([^)]+\)/g, '#333333');
+               } catch (e) {}
+             });
+
+             // Recursively find and fix oklch colors in inline/computed styles for elements
+             const allElements = clonedEl.querySelectorAll('*');
+             const canvasHelper = clonedDoc.createElement('canvas'); 
+             const ctx = canvasHelper.getContext('2d');
+             
+             allElements.forEach((child) => {
+               const element = child as HTMLElement;
+               
+               // Remove filter/backdropFilter as they cause issues
+               element.style.filter = 'none';
+               element.style.backdropFilter = 'none';
+
+               // Properties to check for oklch colors
+               const props = ['color', 'backgroundColor', 'borderColor', 'outlineColor', 'fill', 'stroke', 'stopColor'];
+               
+               props.forEach(prop => {
+                 // Try to get value carefully to avoid triggering crash if possible
+                 let val = '';
+                 try {
+                    val = element.style.getPropertyValue(prop);
+                    if (!val || val.includes('oklch') || val.includes('oklab')) {
+                      const computed = win.getComputedStyle(element);
+                      val = computed.getPropertyValue(prop);
+                    }
+                 } catch (e) {}
+
+                 if (val && (val.includes('oklch') || val.includes('oklab'))) {
+                   let converted = false;
+                   if (ctx) {
+                     try {
+                       ctx.fillStyle = val;
+                       const rgbVal = ctx.fillStyle; 
+                       if (rgbVal && !rgbVal.includes('oklch') && !rgbVal.includes('oklab') && rgbVal !== '#000000') {
+                         element.style.setProperty(prop, rgbVal, 'important');
+                         converted = true;
+                       }
+                     } catch (e) {}
+                   }
+                   
+                   if (!converted) {
+                      if (prop === 'color' || prop === 'stroke') element.style.setProperty(prop, '#000000', 'important');
+                      else if (prop === 'backgroundColor' || prop === 'fill') element.style.setProperty(prop, '#ffffff', 'important');
+                      else element.style.setProperty(prop, 'transparent', 'important');
+                   }
+                 }
+               });
+             });
+          }
         }
       });
       
-      console.log("Capture completed successfully.");
-      return dataUrl;
+      const canvasDataUrl = canvas.toDataURL('image/png');
+      console.log("Capture with html2canvas successful.");
+      return canvasDataUrl;
     } catch (err) {
-      console.warn("html-to-image failed, trying html2canvas fallback...", err);
+      console.error("All capture methods failed:", err);
       try {
-        const html2canvas = (await import('html2canvas')).default;
-        const canvas = await html2canvas(el, {
-          useCORS: true,
-          allowTaint: false,
-          backgroundColor: '#ffffff',
-          scale: 2,
-          logging: false,
-          onclone: (clonedDoc) => {
-            const clonedEl = clonedDoc.getElementById(elementId);
-            if (clonedEl) {
-              clonedEl.style.transform = 'none';
-              clonedEl.style.visibility = 'visible';
-              clonedEl.style.display = 'flex';
-              clonedEl.style.opacity = '1';
-            }
-          }
-        });
-        return canvas.toDataURL('image/png');
-      } catch (fallbackErr) {
-        console.error("Both capture methods failed:", fallbackErr);
+        // Absolute last resort: simplest possible capture
+        return await htmlToImage.toPng(el);
+      } catch (finalErr) {
         alert(`Gagal mengambil gambar: ${err instanceof Error ? err.message : 'Unknown Error'}`);
         return null;
       }
@@ -716,37 +850,45 @@ export default function App() {
     }
   };
 
-  const downloadAsPNG = async (elementId: string, fileName: string) => {
+  const downloadAsPDF = async (elementId: string, fileName: string) => {
     toggleLoader(true);
     try {
-      console.log(`Preparing download for ${elementId}...`);
+      console.log(`Preparing PDF download for ${elementId}...`);
       const dataUrl = await captureElement(elementId);
       if (!dataUrl) {
-        console.warn("No data URL generated from captureElement");
         toggleLoader(false);
         return;
       }
       
-      const link = document.createElement('a');
-      link.style.display = 'none';
-      link.download = fileName;
-      link.href = dataUrl;
-      document.body.appendChild(link);
-      link.click();
-      setTimeout(() => {
-        document.body.removeChild(link);
-      }, 100);
-      console.log("Download triggered successfully.");
+      // Create image object to get real dimensions
+      const img = new Image();
+      img.src = dataUrl;
+      await new Promise(resolve => img.onload = resolve);
+      
+      // Use logical dimensions (divided by 2 because we used pixelRatio: 2)
+      const logicalWidth = img.width / 2;
+      const logicalHeight = img.height / 2;
+
+      const pdf = new jsPDF({
+        orientation: logicalWidth > logicalHeight ? 'l' : 'p',
+        unit: 'px',
+        format: [logicalWidth, logicalHeight]
+      });
+
+      pdf.addImage(dataUrl, 'PNG', 0, 0, logicalWidth, logicalHeight);
+      
+      pdf.save(fileName.replace('.png', '.pdf'));
+      console.log("PDF download triggered successfully.");
     } catch (err) {
-      console.error("Download failed:", err);
-      alert("Gagal mengunduh gambar. Silakan coba lagi.");
+      console.error("PDF download failed:", err);
+      alert("Gagal mengunduh PDF. Silakan coba lagi.");
     } finally {
       toggleLoader(false);
     }
   };
 
-  const downloadClassPNG = (className: string) => {
-    downloadAsPNG(`card-kelas-${className}`, `Barcode-Kelas-${className}.png`);
+  const downloadClassPDF = (className: string) => {
+    downloadAsPDF(`card-kelas-${className}`, `Barcode-Kelas-${className}.pdf`);
   };
 
   useEffect(() => {
@@ -1603,43 +1745,45 @@ export default function App() {
         </div>
 
         <div className="bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden">
-           <table className="w-full text-left text-sm">
-              <thead className="bg-gray-50 text-gray-400 uppercase text-[10px] font-black tracking-widest border-b">
-                 <tr>
-                    <th className="px-6 py-4">Nama Siswa</th>
-                    <th className="px-6 py-4">Kelas</th>
-                    <th className="px-6 py-4 text-center">Aksi</th>
-                 </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                 {myStudents.map((s, idx) => (
-                    <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                       <td className="px-6 py-4">
-                          <div className="flex items-center gap-3">
-                             <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden border">
-                                {s.foto ? <img src={s.foto} className="w-full h-full object-cover" /> : <User size={14} className="text-gray-400" />}
-                             </div>
-                             <span className="font-bold text-zinc-900">{s.nama}</span>
-                          </div>
-                       </td>
-                       <td className="px-6 py-4 font-medium text-gray-500">{s.kelas}</td>
-                       <td className="px-6 py-4 text-center">
-                          <button 
-                             onClick={() => setSelectedStudentCard(s)}
-                             className="bg-green-50 text-green-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-green-100 transition-all"
-                          >
-                             Lihat Profil
-                          </button>
-                       </td>
-                    </tr>
-                 ))}
-                 {myStudents.length === 0 && (
-                    <tr>
-                       <td colSpan={3} className="p-12 text-center text-gray-400 font-medium">Belum ada siswa di kelas ini.</td>
-                    </tr>
-                 )}
-              </tbody>
-           </table>
+           <div className="overflow-x-auto">
+             <table className="w-full text-left text-sm">
+                <thead className="bg-gray-50 text-gray-400 uppercase text-[10px] font-black tracking-widest border-b">
+                   <tr>
+                      <th className="px-6 py-4">Nama Siswa</th>
+                      <th className="px-6 py-4">Kelas</th>
+                      <th className="px-6 py-4 text-center">Aksi</th>
+                   </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                   {myStudents.map((s, idx) => (
+                      <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                         <td className="px-6 py-4">
+                            <div className="flex items-center gap-3">
+                               <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden border">
+                                  {s.foto ? <img src={s.foto} className="w-full h-full object-cover" /> : <User size={14} className="text-gray-400" />}
+                               </div>
+                               <span className="font-bold text-zinc-900">{s.nama}</span>
+                            </div>
+                         </td>
+                         <td className="px-6 py-4 font-medium text-gray-500">{s.kelas}</td>
+                         <td className="px-6 py-4 text-center">
+                            <button 
+                               onClick={() => setSelectedStudentCard(s)}
+                               className="bg-green-50 text-green-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-green-100 transition-all"
+                            >
+                               Lihat Profil
+                            </button>
+                         </td>
+                      </tr>
+                   ))}
+                   {myStudents.length === 0 && (
+                      <tr>
+                         <td colSpan={3} className="p-12 text-center text-gray-400 font-medium">Belum ada siswa di kelas ini.</td>
+                      </tr>
+                   )}
+                </tbody>
+             </table>
+           </div>
         </div>
       </motion.div>
     );
@@ -1694,6 +1838,10 @@ export default function App() {
                          <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100">
                             <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Tempat Lahir</p>
                             <p className="font-bold text-sm">{selectedStudentCard.tempat || '-'}</p>
+                         </div>
+                         <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Tanggal Lahir</p>
+                            <p className="font-bold text-sm">{selectedStudentCard.tgl ? formatIndoDate(selectedStudentCard.tgl) : '-'}</p>
                          </div>
                       </div>
                    </div>
@@ -2228,11 +2376,11 @@ export default function App() {
                   <motion.div 
                     initial={{ scale: 0.95, opacity: 0 }} 
                     animate={{ scale: 1, opacity: 1 }}
-                    className={`p-4 rounded-2xl border-2 flex flex-col gap-2 ${
-                      scanResult.status === 'Alfa' ? 'bg-rose-50 border-rose-200 text-rose-800' :
-                      scanResult.success ? 'bg-green-50 border-green-200 text-green-800' : 
-                      'bg-red-50 border-red-200 text-red-800'
-                    }`}
+                    className={`p-4 rounded-2xl border-2 flex flex-col gap-2`} style={{
+                      ...(scanResult.status === 'Alfa' ? { backgroundColor: '#fff1f2', borderColor: '#fecdd3', color: '#9f1239' } :
+                          scanResult.success ? { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0', color: '#166534' } : 
+                          { backgroundColor: '#fef2f2', borderColor: '#fecaca', color: '#991b1b' })
+                    }}
                   >
                     <div className="flex items-center gap-3">
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center ${scanResult.status === 'Alfa' ? 'bg-rose-500' : scanResult.success ? 'bg-green-500' : 'bg-red-500'} text-white`}>
@@ -2307,20 +2455,21 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto text-zinc-900">
-                <table className="w-full text-left text-sm min-w-[800px]">
-                  <thead className="bg-gray-50 text-gray-400 uppercase text-[10px] font-black tracking-widest border-b border-gray-100">
-                    <tr>
-                      <th className="px-6 py-4 text-center w-12">No</th>
-                      <th className="px-6 py-4">Foto</th>
-                      <th className="px-6 py-4">NISN</th>
-                      <th className="px-6 py-4">Nama</th>
-                      <th className="px-6 py-4">Kelas</th>
-                      <th className="px-6 py-4">Orang Tua</th>
-                      <th className="px-6 py-4">Kontak</th>
-                      <th className="px-6 py-4">Aksi</th>
-                    </tr>
-                  </thead>
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden text-zinc-900">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm min-w-[800px]">
+                    <thead className="bg-gray-50 text-gray-400 uppercase text-[10px] font-black tracking-widest border-b border-gray-100">
+                      <tr>
+                        <th className="px-6 py-4 text-center w-12">No</th>
+                        <th className="px-6 py-4">Foto</th>
+                        <th className="px-6 py-4">NISN</th>
+                        <th className="px-6 py-4">Nama</th>
+                        <th className="px-6 py-4">Kelas</th>
+                        <th className="px-6 py-4">Orang Tua</th>
+                        <th className="px-6 py-4">Kontak</th>
+                        <th className="px-6 py-4">Aksi</th>
+                      </tr>
+                    </thead>
                     <tbody className="divide-y divide-gray-50">
                       {students.filter(s => filterAdminSiswaClass ? s.kelas === filterAdminSiswaClass : true).slice(pagination.siswa, pagination.siswa + pageSize).map((s, i) => (
                         <tr key={i} className="hover:bg-gray-50 transition-colors group">
@@ -2354,6 +2503,7 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
+            </div>
               {students.length > pageSize && (
                 <div className="mt-4 flex justify-end items-center gap-4 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
                   <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Halaman {Math.floor(pagination.siswa / pageSize) + 1}</span>
@@ -2525,8 +2675,9 @@ export default function App() {
                 </div>
               </div>
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-gray-50 text-gray-400 uppercase text-[10px] font-black tracking-widest border-b border-gray-100">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-gray-50 text-gray-400 uppercase text-[10px] font-black tracking-widest border-b border-gray-100">
                     <tr>
                       <th className="px-6 py-4 text-center w-12">No</th>
                       <th className="px-6 py-4">Guru</th>
@@ -2562,6 +2713,7 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
+            </div>
               {teachingSchedules.length > pageSize && (
                 <div className="mt-4 flex justify-end items-center gap-4 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
                   <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Halaman {Math.floor(pagination.jadwal / pageSize) + 1}</span>
@@ -2610,47 +2762,49 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto text-zinc-900">
-                <table className="w-full text-left text-sm min-w-[800px]">
-                  <thead className="bg-gray-50 text-gray-400 uppercase text-[10px] font-black tracking-widest border-b border-gray-100">
-                    <tr>
-                      <th className="px-6 py-4 text-center w-12 text-nowrap">No</th>
-                      <th className="px-6 py-4">Foto / NIP</th>
-                      <th className="px-6 py-4">Nama Guru</th>
-                      <th className="px-6 py-4">Jabatan</th>
-                      <th className="px-6 py-4">Wali Kelas</th>
-                      <th className="px-6 py-4">Username</th>
-                      <th className="px-6 py-4">Aksi</th>
-                    </tr>
-                  </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {teachers.slice(pagination.guru, pagination.guru + pageSize).map((g, i) => (
-                        <tr key={i} className="hover:bg-gray-50 transition-colors">
-                          <td className="px-6 py-4 text-center font-bold text-gray-400 text-xs">{pagination.guru + i + 1}</td>
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden text-zinc-900">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm min-w-[800px]">
+                    <thead className="bg-gray-50 text-gray-400 uppercase text-[10px] font-black tracking-widest border-b border-gray-100">
+                      <tr>
+                        <th className="px-6 py-4 text-center w-12 text-nowrap">No</th>
+                        <th className="px-6 py-4">Foto / NIP</th>
+                        <th className="px-6 py-4">Nama Guru</th>
+                        <th className="px-6 py-4">Jabatan</th>
+                        <th className="px-6 py-4">Wali Kelas</th>
+                        <th className="px-6 py-4">Username</th>
+                        <th className="px-6 py-4">Aksi</th>
+                      </tr>
+                    </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {teachers.slice(pagination.guru, pagination.guru + pageSize).map((g, i) => (
+                          <tr key={i} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-6 py-4 text-center font-bold text-gray-400 text-xs">{pagination.guru + i + 1}</td>
+                            <td className="px-6 py-4">
+                              <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden border">
+                                {g.foto ? <img src={g.foto} className="w-full h-full object-cover" /> : <User size={16} className="text-gray-300" />}
+                              </div>
+                            </td>
                           <td className="px-6 py-4">
-                            <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden border">
-                              {g.foto ? <img src={g.foto} className="w-full h-full object-cover" /> : <User size={16} className="text-gray-300" />}
+                             <p className="font-bold">{g.nama}</p>
+                             <p className="text-[10px] font-mono font-bold text-gray-400">NIP: {g.nip}</p>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded text-[9px] font-black uppercase">{g.jabatan || 'Guru'}</span>
+                          </td>
+                          <td className="px-6 py-4"><span className="text-green-800 text-[10px] font-bold">{g.kelas || '-'}</span></td>
+                          <td className="px-6 py-4 text-gray-600 font-medium">{g.user}</td>
+                          <td className="px-6 py-4">
+                            <div className="flex gap-2">
+                               <button onClick={() => { setEditingGuru({ nip: g.nip, nama: g.nama, kelas: g.kelas, user: g.user, pass: g.pass, role: g.role, foto: g.foto }); setShowGuruModal(true); }} className="text-blue-500 hover:text-blue-800"><Edit size={16} /></button>
+                               <button onClick={() => handleDeleteGuru(g.nip, g.nama)} className="text-red-500 hover:text-red-800"><Trash2 size={16} /></button>
                             </div>
                           </td>
-                        <td className="px-6 py-4">
-                           <p className="font-bold">{g.nama}</p>
-                           <p className="text-[10px] font-mono font-bold text-gray-400">NIP: {g.nip}</p>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className="bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded text-[9px] font-black uppercase">{g.jabatan || 'Guru'}</span>
-                        </td>
-                        <td className="px-6 py-4"><span className="text-green-800 text-[10px] font-bold">{g.kelas || '-'}</span></td>
-                        <td className="px-6 py-4 text-gray-600 font-medium">{g.user}</td>
-                        <td className="px-6 py-4">
-                          <div className="flex gap-2">
-                             <button onClick={() => { setEditingGuru({ nip: g.nip, nama: g.nama, kelas: g.kelas, user: g.user, pass: g.pass, role: g.role, foto: g.foto }); setShowGuruModal(true); }} className="text-blue-500 hover:text-blue-800"><Edit size={16} /></button>
-                             <button onClick={() => handleDeleteGuru(g.nip, g.nama)} className="text-red-500 hover:text-red-800"><Trash2 size={16} /></button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
               {teachers.length > pageSize && (
                 <div className="mt-4 flex justify-end items-center gap-4 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm text-zinc-900">
@@ -2705,7 +2859,7 @@ export default function App() {
                       <div className="mt-4 flex flex-col items-center p-3 rounded-2xl">
                         <p className="text-[9px] font-black text-gray-400 uppercase mb-2">Barcode Absensi Guru</p>
                         <div className="bg-white p-2 rounded-lg shadow-sm border border-gray-50 flex items-center justify-center">
-                          <QRCodeCanvas 
+                          <QRCodeSVG 
                             value={k.nama} 
                             size={80}
                             level="H"
@@ -2724,7 +2878,7 @@ export default function App() {
                         <div style={{ padding:'50px', backgroundColor:'#ffffff', textAlign:'center', width:'600px', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center' }}>
                           <h2 style={{ color:'#14532d', fontSize:'36px', marginBottom:'30px', fontWeight:'900', lineHeight:'1.2', textTransform:'uppercase' }}>ABSENSI MENGAJAR<br/>KELAS {k.nama}</h2>
                           <div style={{ backgroundColor: '#ffffff', padding: '20px', borderRadius: '30px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', border: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <QRCodeCanvas 
+                            <QRCodeSVG 
                               value={k.nama} 
                               size={400}
                               level="H"
@@ -2741,10 +2895,10 @@ export default function App() {
                         <Printer size={12} /> Cetak
                       </button>
                       <button 
-                        onClick={() => downloadClassPNG(k.nama)}
+                        onClick={() => downloadClassPDF(k.nama)}
                         className="flex-1 bg-blue-600 text-white text-[10px] font-bold py-2 rounded-lg flex items-center justify-center gap-1 hover:bg-blue-700 transition-all text-nowrap"
                       >
-                        <Download size={12} /> PNG
+                        <Download size={12} /> PDF
                       </button>
                       <button onClick={() => { setEditingKelas({ ...k, oldNama: k.nama }); setShowKelasModal(true); }} className="bg-gray-100 text-gray-600 p-2 rounded-lg hover:bg-gray-200">
                          <Edit size={14} />
@@ -3093,8 +3247,9 @@ export default function App() {
                     {[10, 20, 50, 100].map(v => <option key={v} value={v}>Tampil {v}</option>)}
                   </select>
                </div>
-               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto">
-                <table className="w-full text-left text-sm min-w-[700px]">
+               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm min-w-[700px]">
                   <thead className="bg-gray-50 text-gray-400 uppercase text-[10px] font-black tracking-widest border-b border-gray-100">
                     <tr>
                       <th className="px-6 py-4 text-center w-12">No</th>
@@ -3124,6 +3279,7 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
+            </div>
               {teacherAttendance.length > pageSize && (
                 <div className="mt-4 flex justify-end items-center gap-4 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm text-zinc-900">
                   <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Halaman {Math.floor(pagination.absensiGuru / pageSize) + 1}</span>
@@ -3569,84 +3725,86 @@ export default function App() {
               </div>
 
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-gray-50 text-gray-400 uppercase text-[10px] font-black tracking-widest border-b border-gray-100">
-                    {rekapFilter.type === 'Siswa' ? (
-                      <tr>
-                        <th className="px-6 py-4">Nama Siswa</th>
-                        <th className="px-6 py-4 text-center">Kelas</th>
-                        <th className="px-6 py-4 text-center">Hadir</th>
-                        <th className="px-6 py-4 text-center">Izin</th>
-                        <th className="px-6 py-4 text-center">Sakit</th>
-                        <th className="px-6 py-4 text-center">Alfa</th>
-                        <th className="px-6 py-4 text-center">% Kehadiran</th>
-                      </tr>
-                    ) : (
-                      <tr>
-                        <th className="px-6 py-4">Nama Guru</th>
-                        <th className="px-6 py-4 text-center">Jabatan</th>
-                        <th className="px-6 py-4 text-center">Kelas Mengajar</th>
-                        <th className="px-6 py-4 text-center">Target Sesi</th>
-                        <th className="px-6 py-4 text-center">Aktual</th>
-                        <th className="px-6 py-4 text-center">% Kinerja</th>
-                      </tr>
-                    )}
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {rekapFilter.type === 'Siswa' ? (
-                      students
-                        .filter(s => (rekapFilter.kelas ? s.kelas === rekapFilter.kelas : true))
-                        .map((s, i) => {
-                          const monthAttendance = attendance.filter(a => a.nisn === s.nisn && a.tanggal.startsWith(rekapFilter.bulan));
-                          const hadir = monthAttendance.filter(a => a.status === 'Hadir').length;
-                          const izin = monthAttendance.filter(a => a.status === 'Izin').length;
-                          const sakit = monthAttendance.filter(a => a.status === 'Sakit').length;
-                          const alfa = monthAttendance.filter(a => a.status === 'Alfa').length;
-                          const total = hadir + izin + sakit + alfa;
-                          const perc = total > 0 ? Math.round(((hadir + izin + sakit) / 25) * 100) : 0; // Using 25 as denominator for realistic percentage
-                          
-                          return (
-                            <tr key={i} className="hover:bg-gray-50 transition-colors">
-                              <td className="px-6 py-4 font-bold">{s.nama}</td>
-                              <td className="px-6 py-4 text-center font-medium">{s.kelas}</td>
-                              <td className="px-6 py-4 text-center">{hadir}</td>
-                              <td className="px-6 py-4 text-center">{izin}</td>
-                              <td className="px-6 py-4 text-center">{sakit}</td>
-                              <td className="px-6 py-4 text-center text-red-600 font-bold">{alfa}</td>
-                              <td className="px-6 py-4 text-center">
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${perc >= 80 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                  {perc}%
-                                </span>
-                              </td>
-                            </tr>
-                          );
-                        })
-                    ) : (
-                      teachers
-                        .map((t, i) => {
-                          const schedules = teachingSchedules.filter(ts => ts.nip === t.nip);
-                          const totalTarget = schedules.reduce((sum, sch) => sum + sch.targetPertemuan, 0);
-                          const actual = teacherAttendance.filter(ta => ta.nip === t.nip && ta.tanggal.startsWith(rekapFilter.bulan)).length;
-                          const perc = totalTarget > 0 ? Math.round((actual / totalTarget) * 100) : 0;
-                          
-                          return (
-                            <tr key={i} className="hover:bg-gray-50 transition-colors">
-                              <td className="px-6 py-4 font-bold">{t.nama}</td>
-                              <td className="px-6 py-4 text-center text-[10px] font-black uppercase text-gray-400">{t.jabatan || 'Guru'}</td>
-                              <td className="px-6 py-4 text-center text-[10px] font-black uppercase text-gray-400">{schedules.map(s => s.kelas).join(', ') || '-'}</td>
-                              <td className="px-6 py-4 text-center font-bold">{totalTarget}</td>
-                              <td className="px-6 py-4 text-center font-bold text-blue-600">{actual}</td>
-                              <td className="px-6 py-4 text-center">
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${perc >= 50 ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>
-                                  {perc}%
-                                </span>
-                              </td>
-                            </tr>
-                          );
-                        })
-                    )}
-                  </tbody>
-                </table>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-gray-50 text-gray-400 uppercase text-[10px] font-black tracking-widest border-b border-gray-100">
+                      {rekapFilter.type === 'Siswa' ? (
+                        <tr>
+                          <th className="px-6 py-4">Nama Siswa</th>
+                          <th className="px-6 py-4 text-center">Kelas</th>
+                          <th className="px-6 py-4 text-center">Hadir</th>
+                          <th className="px-6 py-4 text-center">Izin</th>
+                          <th className="px-6 py-4 text-center">Sakit</th>
+                          <th className="px-6 py-4 text-center">Alfa</th>
+                          <th className="px-6 py-4 text-center">% Kehadiran</th>
+                        </tr>
+                      ) : (
+                        <tr>
+                          <th className="px-6 py-4">Nama Guru</th>
+                          <th className="px-6 py-4 text-center">Jabatan</th>
+                          <th className="px-6 py-4 text-center">Kelas Mengajar</th>
+                          <th className="px-6 py-4 text-center">Target Sesi</th>
+                          <th className="px-6 py-4 text-center">Aktual</th>
+                          <th className="px-6 py-4 text-center">% Kinerja</th>
+                        </tr>
+                      )}
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {rekapFilter.type === 'Siswa' ? (
+                        students
+                          .filter(s => (rekapFilter.kelas ? s.kelas === rekapFilter.kelas : true))
+                          .map((s, i) => {
+                            const monthAttendance = monthAttendanceMap[s.nisn] || [];
+                            const hadir = monthAttendance.filter(a => a.status === 'Hadir').length;
+                            const izin = monthAttendance.filter(a => a.status === 'Izin').length;
+                            const sakit = monthAttendance.filter(a => a.status === 'Sakit').length;
+                            const alfa = monthAttendance.filter(a => a.status === 'Alfa').length;
+                            const total = hadir + izin + sakit + alfa;
+                            const perc = total > 0 ? Math.round(((hadir + izin + sakit) / 25) * 100) : 0; // Using 25 as denominator for realistic percentage
+                            
+                            return (
+                              <tr key={i} className="hover:bg-gray-50 transition-colors">
+                                <td className="px-6 py-4 font-bold">{s.nama}</td>
+                                <td className="px-6 py-4 text-center font-medium">{s.kelas}</td>
+                                <td className="px-6 py-4 text-center">{hadir}</td>
+                                <td className="px-6 py-4 text-center">{izin}</td>
+                                <td className="px-6 py-4 text-center">{sakit}</td>
+                                <td className="px-6 py-4 text-center text-red-600 font-bold">{alfa}</td>
+                                <td className="px-6 py-4 text-center">
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${perc >= 80 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                    {perc}%
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })
+                      ) : (
+                        teachers
+                          .map((t, i) => {
+                            const schedules = teachingSchedules.filter(ts => ts.nip === t.nip);
+                            const totalTarget = schedules.reduce((sum, sch) => sum + sch.targetPertemuan, 0);
+                            const actual = (teacherAttendanceMap[t.nip] || []).length;
+                            const perc = totalTarget > 0 ? Math.round((actual / totalTarget) * 100) : 0;
+                            
+                            return (
+                              <tr key={i} className="hover:bg-gray-50 transition-colors">
+                                <td className="px-6 py-4 font-bold">{t.nama}</td>
+                                <td className="px-6 py-4 text-center text-[10px] font-black uppercase text-gray-400">{t.jabatan || 'Guru'}</td>
+                                <td className="px-6 py-4 text-center text-[10px] font-black uppercase text-gray-400">{schedules.map(s => s.kelas).join(', ') || '-'}</td>
+                                <td className="px-6 py-4 text-center font-bold">{totalTarget}</td>
+                                <td className="px-6 py-4 text-center font-bold text-blue-600">{actual}</td>
+                                <td className="px-6 py-4 text-center">
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${perc >= 50 ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>
+                                    {perc}%
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </motion.div>
           )}
@@ -3977,17 +4135,18 @@ export default function App() {
           )}
 
           {selectedStudentCard && (session?.role === 'Siswa' || session?.role === 'Admin') && (
-            <div className="fixed inset-0 z-[200] flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
+            <div className="fixed inset-0 z-[200] flex items-center justify-center p-2 sm:p-4 overflow-y-auto" style={{ backgroundColor: 'rgba(0, 0, 0, 0.6)', backdropFilter: 'blur(4px)' }}>
               <div className="absolute inset-0" onClick={() => setSelectedStudentCard(null)} />
               <motion.div 
                 initial={{ scale: 0.9, opacity: 0 }} 
                 animate={{ scale: 1, opacity: 1 }} 
-                className="relative bg-white/10 backdrop-blur-3xl p-4 md:p-8 rounded-[2rem] md:rounded-[3rem] shadow-2xl flex flex-col items-center border border-white/20 w-fit max-w-[95vw] sm:max-w-none max-h-[95vh] overflow-y-auto scale-[0.75] sm:scale-[0.85] md:scale-90 lg:scale-100 my-auto origin-top"
+                className="relative p-4 md:p-8 rounded-[2rem] md:rounded-[3rem] shadow-2xl flex flex-col items-center border w-fit max-w-[95vw] sm:max-w-none max-h-[95vh] overflow-y-auto scale-[0.75] sm:scale-[0.85] md:scale-90 lg:scale-100 my-auto origin-top"
+                style={{ backgroundColor: 'rgba(255, 255, 255, 0.1)', backdropFilter: 'blur(16px)', borderColor: 'rgba(255, 255, 255, 0.2)' }}
               >
-                  <div id="print-student-card" className="flex flex-col md:flex-row gap-4 p-4 bg-black/5 rounded-[2rem] w-full" style={{ width: 'fit-content' }}>
+                  <div id="print-student-card" className="flex flex-col md:flex-row gap-4 p-4 w-full" style={{ width: 'fit-content', backgroundColor: 'rgba(0,0,0,0.05)', borderRadius: '2rem' }}>
                     {/* FRONT SIDE */}
                     <div style={{ 
-                      background: appConfig.cardTemplateUrl ? `url(${appConfig.cardTemplateUrl}) center/cover no-repeat` : 'linear-gradient(135deg, #14532d 0%, #052e16 100%)', 
+                      background: appConfig.cardTemplateUrl ? 'none' : 'linear-gradient(135deg, #14532d 0%, #052e16 100%)', 
                       color: '#ffffff', 
                       width: '320px', 
                       height: '480px', 
@@ -4001,6 +4160,14 @@ export default function App() {
                       padding: '40px 24px',
                       fontFamily: 'Inter, sans-serif'
                     }}>
+                      {appConfig.cardTemplateUrl && (
+                        <img 
+                           src={appConfig.cardTemplateUrl} 
+                           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 0 }} 
+                           crossOrigin="anonymous" 
+                           alt="Background"
+                        />
+                      )}
                       {!appConfig.cardTemplateUrl && (
                         <div style={{ width: '80px', height: '80px', backgroundColor: 'white', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '10px', marginBottom: '20px', boxShadow: '0 8px 24px rgba(0,0,0,0.2)', zIndex: 10 }}>
                           <img src={appLogo} style={{ width: '100%', height: '100%', objectFit: 'contain' }} crossOrigin="anonymous" />
@@ -4014,7 +4181,7 @@ export default function App() {
 
                       <div style={{ width: '110px', height: '145px', borderRadius: '24px', backgroundColor: 'rgba(255,255,255,0.1)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '25px', border: '4px solid rgba(255,255,255,0.1)', zIndex: 20 }}>
                          {selectedStudentCard.foto ? (
-                           <img src={selectedStudentCard.foto} style={{ width: '100%', height: '100%', objectFit: 'cover' }} crossOrigin="anonymous" />
+                           <img src={selectedStudentCard.foto} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} crossOrigin="anonymous" />
                          ) : (
                            <User size={64} style={{ color: 'rgba(255,255,255,0.1)' }} />
                          )}
@@ -4041,7 +4208,7 @@ export default function App() {
 
                     {/* BACK SIDE */}
                     <div style={{ 
-                      background: appConfig.cardTemplateUrl ? `url(${appConfig.cardTemplateUrl}) center/cover no-repeat` : 'linear-gradient(135deg, #052e16 0%, #14532d 100%)', 
+                      background: appConfig.cardTemplateUrl ? 'none' : 'linear-gradient(135deg, #052e16 0%, #14532d 100%)', 
                       color: '#ffffff', 
                       width: '320px', 
                       height: '480px', 
@@ -4055,13 +4222,21 @@ export default function App() {
                       fontFamily: 'Inter, sans-serif',
                       justifyContent: 'center'
                     }}>
-                      <div style={{ marginBottom: '30px', textAlign: 'center' }}>
+                      {appConfig.cardTemplateUrl && (
+                        <img 
+                           src={appConfig.cardTemplateUrl} 
+                           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 0 }} 
+                           crossOrigin="anonymous" 
+                           alt="Background"
+                        />
+                      )}
+                      <div style={{ marginBottom: '30px', textAlign: 'center', zIndex: 10 }}>
                         <h4 style={{ fontSize: '14px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '8px' }}>Kartu Presensi Digital</h4>
                         <div style={{ height: '2px', width: '40px', background: '#16a34a', margin: '0 auto' }}></div>
                       </div>
 
                       <div style={{ backgroundColor: '#ffffff', padding: '15px', borderRadius: '24px', boxShadow: '0 8px 24px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <QRCodeCanvas 
+                        <QRCodeSVG 
                           value={selectedStudentCard.nisn} 
                           size={150}
                           level="H"
@@ -4079,10 +4254,10 @@ export default function App() {
 
                   <div className="mt-8 flex gap-3 w-full max-w-md">
                     <button 
-                      onClick={() => downloadAsPNG('print-student-card', `Kartu-Siswa-${selectedStudentCard.nisn}.png`)}
+                      onClick={() => downloadAsPDF('print-student-card', `Kartu-Siswa-${selectedStudentCard.nisn}.pdf`)}
                       className="flex-1 bg-green-700 text-white rounded-2xl py-4 md:py-5 font-black text-xs md:text-sm uppercase tracking-widest shadow-xl hover:bg-green-600 active:scale-95 transition-all flex items-center justify-center gap-2"
                     >
-                      <Download size={18} /> Simpan Kartu (PNG)
+                      <Download size={18} /> Simpan Kartu (PDF)
                     </button>
                     <button 
                       onClick={() => setSelectedStudentCard(null)} 
@@ -4104,14 +4279,14 @@ export default function App() {
 
             return (
               <motion.div key="siswa-personal" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8 pb-32">
-                <div className="flex flex-wrap gap-4 items-center justify-between bg-white/50 backdrop-blur-sm p-4 rounded-3xl border border-white/20">
+                <div className="flex flex-wrap gap-4 items-center justify-between p-4 rounded-3xl border" style={{ backgroundColor: 'rgba(255, 255, 255, 0.5)', backdropFilter: 'blur(4px)', borderColor: 'rgba(255, 255, 255, 0.2)' }}>
                   <div className="flex items-center gap-3">
                     <div className="bg-green-100 p-3 rounded-2xl text-green-700">
                       <Calendar size={24} />
                     </div>
                     <div>
                       <h2 className="text-xl font-black text-green-950 uppercase tracking-tighter">Ringkasan Harian</h2>
-                      <p className="text-[10px] font-bold text-green-600/60 uppercase tracking-widest">{formatIndoDate(siswaDashboardDate)}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'rgba(22, 163, 74, 0.6)' }}>{formatIndoDate(siswaDashboardDate)}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 bg-white p-2 rounded-2xl shadow-sm border">
@@ -4170,21 +4345,21 @@ export default function App() {
 
                         <div className="pt-6 border-t border-gray-50">
                           <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3">Status Akhir</p>
-                          <div className={`py-4 rounded-3xl text-center border-2 transition-all ${
-                            selectedDateAttendance?.status === 'Hadir' ? 'bg-green-50 border-green-200 text-green-800' :
-                            selectedDateAttendance?.status === 'Izin' ? 'bg-blue-50 border-blue-200 text-blue-800' :
-                            selectedDateAttendance?.status === 'Sakit' ? 'bg-amber-50 border-amber-200 text-amber-800' :
-                            selectedDateAttendance?.status === 'Alfa' ? 'bg-red-50 border-red-200 text-red-800' :
-                            'bg-gray-50 border-gray-200 text-gray-400'
-                          }`}>
+                          <div className={`py-4 rounded-3xl text-center border-2 transition-all`} style={{
+                            ...(selectedDateAttendance?.status === 'Hadir' ? { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0', color: '#166534' } :
+                                selectedDateAttendance?.status === 'Izin' ? { backgroundColor: '#eff6ff', borderColor: '#bfdbfe', color: '#1e40af' } :
+                                selectedDateAttendance?.status === 'Sakit' ? { backgroundColor: '#fffbeb', borderColor: '#fde68a', color: '#92400e' } :
+                                selectedDateAttendance?.status === 'Alfa' ? { backgroundColor: '#fef2f2', borderColor: '#fecaca', color: '#991b1b' } :
+                                { backgroundColor: '#f9fafb', borderColor: '#e5e7eb', color: '#9ca3af' })
+                          }}>
                             <span className="text-2xl font-black uppercase tracking-widest block">
                               {selectedDateAttendance?.status || 'Belum Absen'}
                             </span>
                             {selectedDateAttendance?.status === 'Hadir' && (
-                              <p className="text-[10px] font-black mt-1 uppercase tracking-widest text-green-600/60">Selamat Belajar!</p>
+                              <p className="text-[10px] font-black mt-1 uppercase tracking-widest" style={{ color: 'rgba(22, 163, 74, 0.6)' }}>Selamat Belajar!</p>
                             )}
                             {selectedDateAttendance?.terlambat && selectedDateAttendance.terlambat > 0 ? (
-                               <p className="text-[10px] font-black mt-2 bg-red-100 text-red-700 px-3 py-1 rounded-full inline-block">Terlambat {selectedDateAttendance.terlambat} Menit</p>
+                               <p className="text-[10px] font-black mt-2 px-3 py-1 rounded-full inline-block" style={{ backgroundColor: '#fee2e2', color: '#b91c1c' }}>Terlambat {selectedDateAttendance.terlambat} Menit</p>
                             ) : null}
                           </div>
                         </div>
@@ -4232,14 +4407,17 @@ export default function App() {
                   </div>
 
                   <div className="xl:col-span-2 space-y-8">
-                    <div className="flex flex-col items-center w-full bg-white/40 backdrop-blur-md p-8 rounded-[3rem] border border-white/50 shadow-sm relative group">
+                    <div 
+                      className="flex flex-col items-center w-full p-8 rounded-[3rem] border shadow-sm relative group"
+                      style={{ backgroundColor: 'rgba(255, 255, 255, 0.4)', backdropFilter: 'blur(12px)', borderColor: 'rgba(255, 255, 255, 0.5)' }}
+                    >
                       <div className="absolute top-6 right-6 opacity-20 group-hover:opacity-100 transition-opacity">
                          <CreditCard className="text-green-900" size={32} />
                       </div>
-                      <div id="personal-student-card" className="flex flex-col lg:flex-row gap-4 p-4 bg-black/5 rounded-[2.5rem] w-fit max-w-full overflow-auto scale-75 md:scale-95 lg:scale-100 origin-top shadow-2xl">
+                      <div id="personal-student-card" className="flex flex-col lg:flex-row gap-4 p-4 w-fit max-w-full overflow-auto scale-75 md:scale-95 lg:scale-100 origin-top" style={{ backgroundColor: 'rgba(0,0,0,0.05)', borderRadius: '2.5rem', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)' }}>
                         {/* FRONT SIDE */}
                         <div style={{ 
-                          background: appConfig.cardTemplateUrl ? `url(${appConfig.cardTemplateUrl}) center/cover no-repeat` : 'linear-gradient(135deg, #14532d 0%, #052e16 100%)', 
+                          background: appConfig.cardTemplateUrl ? 'none' : 'linear-gradient(135deg, #14532d 0%, #052e16 100%)', 
                           color: '#ffffff', 
                           width: '320px', 
                           height: '480px', 
@@ -4253,6 +4431,14 @@ export default function App() {
                           padding: '40px 24px',
                           fontFamily: 'Inter, sans-serif'
                         }}>
+                          {appConfig.cardTemplateUrl && (
+                            <img 
+                               src={appConfig.cardTemplateUrl} 
+                               style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 0 }} 
+                               crossOrigin="anonymous" 
+                               alt="Background"
+                            />
+                          )}
                           {!appConfig.cardTemplateUrl && (
                             <div style={{ width: '80px', height: '80px', backgroundColor: 'white', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '10px', marginBottom: '20px', boxShadow: '0 8px 24px rgba(0,0,0,0.2)', zIndex: 10 }}>
                               <img src={appLogo} style={{ width: '100%', height: '100%', objectFit: 'contain' }} crossOrigin="anonymous" />
@@ -4293,7 +4479,7 @@ export default function App() {
 
                         {/* BACK SIDE */}
                         <div style={{ 
-                          background: appConfig.cardTemplateUrl ? `url(${appConfig.cardTemplateUrl}) center/cover no-repeat` : 'linear-gradient(135deg, #052e16 0%, #14532d 100%)', 
+                          background: appConfig.cardTemplateUrl ? 'none' : 'linear-gradient(135deg, #052e16 0%, #14532d 100%)', 
                           color: '#ffffff', 
                           width: '320px', 
                           height: '480px', 
@@ -4307,13 +4493,21 @@ export default function App() {
                           fontFamily: 'Inter, sans-serif',
                           justifyContent: 'center'
                         }}>
-                          <div style={{ marginBottom: '30px', textAlign: 'center' }}>
+                          {appConfig.cardTemplateUrl && (
+                            <img 
+                               src={appConfig.cardTemplateUrl} 
+                               style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 0 }} 
+                               crossOrigin="anonymous" 
+                               alt="Background"
+                            />
+                          )}
+                          <div style={{ marginBottom: '30px', textAlign: 'center', zIndex: 10 }}>
                             <h4 style={{ fontSize: '14px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '8px' }}>Kartu Presensi Digital</h4>
                             <div style={{ height: '2px', width: '40px', background: '#16a34a', margin: '0 auto' }}></div>
                           </div>
 
                           <div style={{ backgroundColor: '#ffffff', padding: '15px', borderRadius: '24px', boxShadow: '0 8px 24px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <QRCodeCanvas 
+                            <QRCodeSVG 
                               value={session?.uid || ''} 
                               size={150}
                               level="H"
@@ -4332,10 +4526,10 @@ export default function App() {
 
                       <div className="mt-8 flex gap-4 w-full justify-center">
                         <button 
-                          onClick={() => downloadAsPNG('personal-student-card', `Kartu-${session?.uid}.png`)}
+                          onClick={() => downloadAsPDF('personal-student-card', `Kartu-${session?.uid}.pdf`)}
                           className="bg-green-800 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 hover:bg-green-700 active:scale-95 transition-all"
                         >
-                          <Download size={18} /> Simpan Kartu (PNG)
+                          <Download size={18} /> Simpan Kartu (PDF)
                         </button>
                       </div>
                     </div>
@@ -4348,7 +4542,7 @@ export default function App() {
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs text-left">
                           <thead>
-                            <tr className="bg-gray-50/50">
+                            <tr style={{ backgroundColor: 'rgba(249, 250, 251, 0.5)' }}>
                               <th className="px-6 py-4 font-black">TANGGAL</th>
                               <th className="px-6 py-4 font-black">JAM MASUK</th>
                               <th className="px-6 py-4 font-black">JAM PULANG</th>
