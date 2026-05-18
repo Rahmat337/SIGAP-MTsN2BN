@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { GoogleGenAI } from "@google/genai";
 
 const app = express();
@@ -40,6 +41,38 @@ if (process.env.NODE_ENV !== "production") {
     });
     app.use(vite.middlewares);
   })();
+} else {
+  // Production static file serving
+  // On Vercel, process.cwd() is the root, but we should be safe with multiple paths
+  const possiblePaths = [
+    path.join(process.cwd(), 'dist'),
+    path.join(__dirname, 'dist'),
+    path.join(__dirname, '../dist'),
+  ];
+  
+  let distPath = possiblePaths[0];
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      distPath = p;
+      break;
+    }
+  }
+  
+  app.use(express.static(distPath));
+  
+  // Catch-all route for SPA fallback
+  app.get("*", (req, res, next) => {
+    // Skip API routes
+    if (req.path.startsWith("/api/")) return next();
+    
+    const indexPath = path.join(distPath, "index.html");
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      console.error("Index file not found in " + distPath);
+      res.status(404).send("Application files not found. Please ensure the build completed successfully.");
+    }
+  });
 }
 
 // Port listener - redundant on Vercel but needed for local/AIS
