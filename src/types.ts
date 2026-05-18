@@ -49,6 +49,7 @@ export interface TeachingSchedule {
   kelas: string;
   targetPertemuan: number;
   mapel?: string;
+  hari: string;
 }
 
 export interface Classroom {

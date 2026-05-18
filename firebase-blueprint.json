@@ -148,6 +148,10 @@
       "schema": "AppConfig",
       "description": "General application configuration"
     },
+    "roster": {
+      "schema": "object",
+      "description": "Collection for AI roster data (requirements, config, result)"
+    },
     "teachingSchedules": {
       "schema": "TeachingSchedule",
       "description": "Target hours for teachers"

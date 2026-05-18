@@ -1,12 +1,23 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
+import { GoogleGenAI } from "@google/genai";
 
 const app = express();
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build',
+    }
+  }
+});
 
 const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyBPczFq0evqKAWc9G-NN3YJeEsbllnkeHfOzrlRPoMfI8aucROYj3gYrYGEZS3QSjrrA/exec";
 
 app.use(express.json());
+
+
 
 app.post("/api/action", async (req, res) => {
   try {

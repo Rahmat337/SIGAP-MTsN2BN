@@ -365,13 +365,12 @@ export const firestoreService = {
     }
   },
 
-  saveTeachingBatch: async (nip: string, namaGuru: string, classMap: {[key: string]: number}, mapel: string) => {
+  saveTeachingBatch: async (nip: string, namaGuru: string, schedules: {kelas: string, target: number, hari: string}[], mapel: string) => {
     try {
-      const entries = Object.entries(classMap);
-      for (const [kelas, target] of entries) {
-        const id = `${nip}-${kelas}`;
+      for (const item of schedules) {
+        const id = `${nip}-${item.kelas}-${item.hari}`;
         await setDoc(doc(db, 'teachingSchedules', id), {
-          id, nip, namaGuru, kelas, targetPertemuan: target, mapel
+          id, nip, namaGuru, kelas: item.kelas, targetPertemuan: item.target, mapel, hari: item.hari
         });
       }
     } catch (e) {
@@ -433,5 +432,7 @@ export const firestoreService = {
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, 'appConfig/general');
     }
-  }
+  },
+
+
 };

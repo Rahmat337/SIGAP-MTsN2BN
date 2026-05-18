@@ -122,5 +122,10 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin() || true;
     }
+
+    match /roster/{id} {
+      allow read: if true;
+      allow write: if true;
+    }
   }
 }

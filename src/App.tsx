@@ -14,7 +14,7 @@ import {
   ChevronRight, ChevronLeft, ClipboardList, FileBarChart, Table as TableIcon, Search, Plus, 
   RefreshCcw, Printer, Download, Eye, EyeOff, Calendar, Clock, Trash2, Edit, Save,
   ArrowLeft, Upload, FileSpreadsheet, BarChart3, Info, CheckCircle2, XCircle, AlertTriangle,
-  Maximize2, CreditCard
+  Maximize2, CreditCard, Award, ExternalLink, ShieldCheck, Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { firestoreService } from './services/firestoreService';
@@ -53,10 +53,34 @@ const formatIndoDate = (dateStr: string) => {
       day: 'numeric', 
       month: 'long', 
       year: 'numeric' 
-    }).format(d);
+      }).format(d);
   } catch (e) {
     return dateStr;
   }
+};
+
+const countDaysInMonth = (year: number, month: number, dayName: string, holidays: Holiday[]) => {
+  const dayIndex = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"].indexOf(dayName);
+  if (dayIndex === -1) return 0;
+  
+  let count = 0;
+  let date = new Date(year, month, 1);
+  while (date.getMonth() === month) {
+    if (date.getDay() === dayIndex) {
+      // Manual formatting YYYY-MM-DD in local time to match holiday data precisely
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      const dateStr = `${y}-${m}-${d}`;
+      
+      const isHoliday = (holidays || []).some(h => h.tanggal === dateStr);
+      if (!isHoliday) {
+        count++;
+      }
+    }
+    date.setDate(date.getDate() + 1);
+  }
+  return count;
 };
 
 const AttendanceChart = ({ data }: { data: any[] }) => (
@@ -113,6 +137,8 @@ export default function App() {
 
   const [refreshing, setRefreshing] = useState(false);
   const [session, setSession] = useState<UserSession | null>(null);
+  const [studentProfileClassFilter, setStudentProfileClassFilter] = useState('');
+
   const [activePanel, setActivePanel] = useState('home');
 
   const [analysisClass, setAnalysisClass] = useState('');
@@ -239,6 +265,8 @@ export default function App() {
     };
   }, [firebaseConnected]);
 
+  const [selectedTeacherNipForCapaian, setSelectedTeacherNipForCapaian] = useState<string | null>(null);
+
   const stats: DashboardStats & { siswaL?: number, siswaP?: number, sakitCount?: number, izinCount?: number, alfaCount?: number } = useMemo(() => {
     const now = new Date();
     const today = currentDate; // Use the state-synced date
@@ -307,8 +335,6 @@ export default function App() {
     };
   }, [students, teachers, attendance, settings, holidays]);
 
-  const [refreshingDummy, setRefreshingDummy] = useState(false); // Just to satisfy UI
-  
   // Reporting states
   const [rekapFilter, setRekapFilter] = useState({ bulan: new Date().toISOString().slice(0, 7), kelas: '', type: 'Siswa' });
   
@@ -358,6 +384,261 @@ export default function App() {
     } finally {
       setIsUpdatingProfile(false);
     }
+  };
+
+  const [searchTeacherReport, setSearchTeacherReport] = useState('');
+
+
+
+
+
+  const renderRoster = () => {
+    // Generate URL using session data. session.uid is guaranteed after login.
+    // We add a timestamp to prevent caching and ensure a fresh trigger.
+    const currentUserToken = session?.uid || 'guest';
+    const currentUserName = session?.name || 'User';
+    const currentUserRole = session?.role || 'Guru';
+    const rosterUrl = `https://criet-roster.vercel.app/?token=${currentUserToken}&role=${currentUserRole}&name=${encodeURIComponent(currentUserName)}&ts=${Date.now()}`;
+
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[500px] bg-white rounded-[3rem] p-12 shadow-2xl border border-gray-100 text-center relative overflow-hidden">
+        {/* Background Decorative Elements */}
+        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-green-400 via-emerald-500 to-teal-600"></div>
+        <div className="absolute -top-24 -right-24 w-64 h-64 bg-green-50 rounded-full blur-3xl opacity-50"></div>
+        <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-blue-50 rounded-full blur-3xl opacity-50"></div>
+
+        <div className="relative z-10 max-w-lg mx-auto">
+          <motion.div 
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="w-24 h-24 bg-gradient-to-br from-green-500 to-emerald-600 rounded-[2.5rem] flex items-center justify-center mb-8 mx-auto shadow-lg shadow-green-200"
+          >
+            <Sparkles className="text-white" size={44} />
+          </motion.div>
+
+          <h3 className="text-3xl font-black text-gray-900 uppercase tracking-tighter mb-4">
+            Criet Roster <span className="text-green-600">AI</span>
+          </h3>
+          
+          <p className="text-sm font-bold text-gray-500 mb-10 leading-relaxed">
+            Hasilkan jadwal mengajar (roster) sekolah secara otomatis dan efisien menggunakan teknologi AI. 
+            Klik tombol di bawah untuk diarahkan ke platform pembuatan roster.
+          </p>
+
+          <div className="space-y-4">
+            <motion.a 
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              href={rosterUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full bg-zinc-900 text-white rounded-[2rem] py-6 px-8 font-black uppercase tracking-widest shadow-xl hover:bg-zinc-800 transition-all flex items-center justify-center gap-4 group cursor-pointer no-underline"
+            >
+              <ExternalLink size={24} className="text-green-400 group-hover:rotate-12 transition-transform" />
+              Buka Dashboard Roster
+            </motion.a>
+
+            <div className="flex items-center justify-center gap-2 py-3 px-6 bg-zinc-50 rounded-2xl border border-zinc-100">
+              <ShieldCheck size={16} className="text-green-600" />
+              <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">
+                Akses Terproteksi (Sesi Terintegrasi)
+              </span>
+            </div>
+          </div>
+
+          <p className="mt-8 text-[11px] font-bold text-zinc-400 italic">
+            *Anda akan diarahkan ke tab baru secara aman. Gunakan akun SIGAP Anda untuk sinkronisasi data.
+          </p>
+        </div>
+      </div>
+    );
+  };
+
+  const renderLaporanCapaianGuru = () => {
+    const selectedTeacher = teachers.find(t => t.nip === selectedTeacherNipForCapaian);
+
+    return (
+      <div className="space-y-6">
+        {!selectedTeacher ? (
+          <div className="bg-white rounded-[2rem] p-8 shadow-xl border border-gray-100">
+            <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 mb-8">
+              <h3 className="text-xl font-black text-green-950 uppercase tracking-widest flex items-center gap-3">
+                <User className="text-green-600" /> Pilih Guru
+              </h3>
+              <div className="relative w-full md:w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" size={16} />
+                <input 
+                  type="text" 
+                  placeholder="Cari nama guru..."
+                  value={searchTeacherReport}
+                  onChange={e => setSearchTeacherReport(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-gray-50 border-0 rounded-xl text-sm font-bold focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {teachers
+                .filter(t => t.nama.toLowerCase().includes(searchTeacherReport.toLowerCase()))
+                .map((t) => (
+                <button
+                  key={t.nip}
+                  onClick={() => setSelectedTeacherNipForCapaian(t.nip)}
+                  className="bg-gray-50 hover:bg-green-50 p-6 rounded-[2rem] border border-gray-100 text-left transition-all hover:shadow-md flex items-center gap-4 group"
+                >
+                  <div className="w-12 h-12 rounded-2xl bg-zinc-900 flex items-center justify-center text-white overflow-hidden shadow-sm">
+                    {t.foto ? <img src={t.foto} className="w-full h-full object-cover" alt={t.nama} /> : <User size={20} />}
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-black text-zinc-900 group-hover:text-green-900 transition-colors">{t.nama}</p>
+                    <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">{t.jabatan || 'Guru'}</p>
+                  </div>
+                  <ChevronRight size={16} className="text-zinc-300 group-hover:text-green-600" />
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-6 pb-20">
+            <div className="flex items-center gap-4">
+               <button 
+                onClick={() => setSelectedTeacherNipForCapaian(null)}
+                className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 text-zinc-400 hover:text-green-900 transition-colors"
+               >
+                 <ArrowLeft size={20} />
+               </button>
+               <div>
+                  <h3 className="font-black text-xl text-green-950">{selectedTeacher.nama}</h3>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Laporan Capaian Mengajar</p>
+               </div>
+            </div>
+
+            <div className="bg-white rounded-[2.5rem] p-8 md:p-12 shadow-xl border border-gray-100">
+               <h3 className="text-lg font-black text-green-950 mb-6 flex items-center gap-3 uppercase tracking-widest">
+                 <Calendar className="text-green-600" /> Jam Mengajar & Laporan Capaian
+               </h3>
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {(() => {
+                    const now = new Date();
+                    const year = now.getFullYear();
+                    const month = now.getMonth();
+                    const currentMonthPrefix = now.toISOString().slice(0, 7);
+                    
+                    const mySchedules = teachingSchedules.filter(ts => ts.nip === selectedTeacher.nip);
+
+                    // Group schedules by Class and Mapel
+                    const groupedSchedules: {[key: string]: {
+                      kelas: string,
+                      mapel: string,
+                      days: string[],
+                      sessions: any[]
+                    }} = {};
+
+                    mySchedules.forEach(s => {
+                      const key = `${s.kelas}-${s.mapel || 'unnamed'}`;
+                      if (!groupedSchedules[key]) {
+                        groupedSchedules[key] = {
+                          kelas: s.kelas,
+                          mapel: s.mapel || '-',
+                          days: [],
+                          sessions: []
+                        };
+                      }
+                      if (!groupedSchedules[key].days.includes(s.hari)) {
+                        groupedSchedules[key].days.push(s.hari);
+                      }
+                      groupedSchedules[key].sessions.push(s);
+                    });
+
+                    const sortedGroups = Object.values(groupedSchedules);
+
+                    return sortedGroups.length > 0 ? sortedGroups.map((group, idx) => {
+                      let totalMonthlyTarget = 0;
+                      let totalActualSessions = 0;
+
+                      group.sessions.forEach(s => {
+                        const targetOccurrences = countDaysInMonth(year, month, s.hari, holidays);
+                        totalMonthlyTarget += targetOccurrences * (Number(s.targetPertemuan) || 0);
+
+                        const actual = teacherAttendance.filter(ta => 
+                          ta.nip === selectedTeacher.nip && 
+                          ta.kelas === s.kelas && 
+                          ta.tanggal.startsWith(currentMonthPrefix) &&
+                          (() => {
+                            const [y, m, d] = ta.tanggal.split('-').map(Number);
+                            const dObj = new Date(y, m-1, d);
+                            const dayNames = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+                            return dayNames[dObj.getDay()] === s.hari;
+                          })()
+                        ).length;
+                        totalActualSessions += actual;
+                      });
+
+                      const achievementPerc = totalMonthlyTarget > 0 ? Math.min(100, (totalActualSessions / totalMonthlyTarget) * 100) : 0;
+
+                      return (
+                        <div key={idx} className="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
+                           <div className="absolute top-0 right-0 p-4">
+                              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${achievementPerc >= 100 ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>
+                                 <Award size={20} />
+                              </div>
+                           </div>
+                           
+                           <div className="mb-4">
+                              <span className="text-[10px] font-black text-green-600 bg-green-50 px-3 py-1 rounded-full uppercase tracking-widest">
+                                {group.days.join(' / ')}
+                              </span>
+                           </div>
+
+                           <div className="space-y-1 mb-6">
+                              <h4 className="text-xl font-black text-zinc-900">{group.kelas}</h4>
+                              <p className="text-sm font-bold text-gray-400">{group.mapel}</p>
+                           </div>
+
+                           <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-50">
+                              <div>
+                                 <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Target</p>
+                                 <div className="flex items-baseline gap-1">
+                                    <span className="text-lg font-black text-zinc-900">{totalMonthlyTarget}</span>
+                                    <span className="text-[10px] font-bold text-gray-400">Sesi</span>
+                                 </div>
+                              </div>
+                              <div>
+                                 <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Capaian</p>
+                                 <div className="flex items-baseline gap-1">
+                                    <span className="text-lg font-black text-green-700">{totalActualSessions}</span>
+                                    <span className="text-[10px] font-bold text-gray-400">Sesi</span>
+                                 </div>
+                              </div>
+                           </div>
+
+                           <div className="mt-4">
+                              <div className="flex justify-between items-center mb-1.5">
+                                 <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Progress Bulanan</span>
+                                 <span className="text-[10px] font-black text-green-700">{Math.round(achievementPerc)}%</span>
+                              </div>
+                              <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden text-[0px]">
+                                 <motion.div 
+                                   initial={{ width: 0 }}
+                                   animate={{ width: `${achievementPerc}%` }}
+                                   transition={{ duration: 1, ease: "easeOut" }}
+                                   className={`h-full rounded-full ${achievementPerc >= 100 ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-orange-500'}`}
+                                 />
+                              </div>
+                           </div>
+                        </div>
+                      );
+                    }) : (
+                      <div className="col-span-full p-12 text-center bg-gray-50 rounded-[2rem] border border-dashed border-gray-200">
+                         <p className="text-sm font-bold text-gray-400">Guru ini belum memiliki target jam mengajar.</p>
+                      </div>
+                    );
+                  })()}
+               </div>
+            </div>
+          </motion.div>
+        )}
+      </div>
+    );
   };
 
   const renderProfile = () => {
@@ -477,25 +758,123 @@ export default function App() {
 
         <div className="bg-white rounded-[2.5rem] p-8 md:p-12 shadow-xl border border-gray-100">
            <h3 className="text-lg font-black text-green-950 mb-6 flex items-center gap-3 uppercase tracking-widest">
-             <Calendar className="text-green-600" /> Jam Mengajar & Target
+             <Calendar className="text-green-600" /> Jam Mengajar & Laporan Capaian
            </h3>
-           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {mySchedules.length > 0 ? mySchedules.map((s, idx) => (
-                <div key={idx} className="bg-gray-50 p-6 rounded-3xl border border-gray-100 flex items-center justify-between">
-                   <div>
-                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Kelas {s.kelas}</p>
-                      <p className="text-sm font-black text-green-900">{s.mapel || 'Mata Pelajaran'}</p>
-                   </div>
-                   <div className="text-right">
-                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Target Sesi</p>
-                      <p className="text-xl font-black text-green-600">{s.targetPertemuan}</p>
-                   </div>
-                </div>
-              )) : (
-                <div className="col-span-2 p-12 text-center bg-gray-50 rounded-[2rem] border border-dashed border-gray-200">
-                   <p className="text-sm font-bold text-gray-400">Belum ada target jam mengajar yang diatur oleh Admin.</p>
-                </div>
-              )}
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {(() => {
+                const now = new Date();
+                const year = now.getFullYear();
+                const month = now.getMonth();
+                const currentMonthPrefix = now.toISOString().slice(0, 7);
+
+                // Group schedules by Class and Mapel
+                const groupedSchedules: {[key: string]: {
+                  kelas: string,
+                  mapel: string,
+                  days: string[],
+                  sessions: any[]
+                }} = {};
+
+                mySchedules.forEach(s => {
+                  const key = `${s.kelas}-${s.mapel || 'unnamed'}`;
+                  if (!groupedSchedules[key]) {
+                    groupedSchedules[key] = {
+                      kelas: s.kelas,
+                      mapel: s.mapel || '-',
+                      days: [],
+                      sessions: []
+                    };
+                  }
+                  if (!groupedSchedules[key].days.includes(s.hari)) {
+                    groupedSchedules[key].days.push(s.hari);
+                  }
+                  groupedSchedules[key].sessions.push(s);
+                });
+
+                const sortedGroups = Object.values(groupedSchedules);
+
+                return sortedGroups.length > 0 ? sortedGroups.map((group, idx) => {
+                  let totalMonthlyTarget = 0;
+                  let totalActualSessions = 0;
+
+                  group.sessions.forEach(s => {
+                    const targetOccurrences = countDaysInMonth(year, month, s.hari, holidays);
+                    totalMonthlyTarget += targetOccurrences * (Number(s.targetPertemuan) || 0);
+
+                    const actual = teacherAttendance.filter(ta => 
+                      ta.nip === data.nip && 
+                      ta.kelas === s.kelas && 
+                      ta.tanggal.startsWith(currentMonthPrefix) &&
+                      (() => {
+                        const [y, m, d] = ta.tanggal.split('-').map(Number);
+                        const dObj = new Date(y, m-1, d);
+                        const dayNames = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+                        return dayNames[dObj.getDay()] === s.hari;
+                      })()
+                    ).length;
+                    totalActualSessions += actual;
+                  });
+
+                  const achievementPerc = totalMonthlyTarget > 0 ? Math.min(100, (totalActualSessions / totalMonthlyTarget) * 100) : 0;
+
+                  return (
+                    <div key={idx} className="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
+                       <div className="absolute top-0 right-0 p-4">
+                          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${achievementPerc >= 100 ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>
+                             <Award size={20} />
+                          </div>
+                       </div>
+                       
+                       <div className="mb-4">
+                          <span className="text-[10px] font-black text-green-600 bg-green-50 px-3 py-1 rounded-full uppercase tracking-widest">
+                            {group.days.join(' / ')}
+                          </span>
+                       </div>
+
+                       <div className="space-y-1 mb-6">
+                          <h4 className="text-xl font-black text-zinc-900">{group.kelas}</h4>
+                          <p className="text-sm font-bold text-gray-400">{group.mapel}</p>
+                       </div>
+
+                       <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-50">
+                          <div>
+                             <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Target</p>
+                             <div className="flex items-baseline gap-1">
+                                <span className="text-lg font-black text-zinc-900">{totalMonthlyTarget}</span>
+                                <span className="text-[10px] font-bold text-gray-400">Sesi</span>
+                             </div>
+                          </div>
+                          <div>
+                             <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Capaian</p>
+                             <div className="flex items-baseline gap-1">
+                                <span className="text-lg font-black text-green-700">{totalActualSessions}</span>
+                                <span className="text-[10px] font-bold text-gray-400">Sesi</span>
+                             </div>
+                          </div>
+                       </div>
+
+                       <div className="mt-4">
+                          <div className="flex justify-between items-center mb-1.5">
+                             <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Progress Bulanan</span>
+                             <span className="text-[10px] font-black text-green-700">{Math.round(achievementPerc)}%</span>
+                          </div>
+                          <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden text-[0px]">
+                             <motion.div 
+                               initial={{ width: 0 }}
+                               animate={{ width: `${achievementPerc}%` }}
+                               transition={{ duration: 1, ease: "easeOut" }}
+                               className={`h-full rounded-full ${achievementPerc >= 100 ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-orange-500'}`}
+                             />
+                          </div>
+                       </div>
+                    </div>
+                  );
+                }) : (
+                  <div className="col-span-full p-12 text-center bg-gray-50 rounded-[2rem] border border-dashed border-gray-200">
+                     <p className="text-sm font-bold text-gray-400">Belum ada target jam mengajar yang diatur oleh Admin.</p>
+                  </div>
+                );
+              })()}
            </div>
            <p className="text-[10px] text-gray-400 mt-6 font-bold uppercase tracking-widest italic">*Data jam mengajar hanya dapat diubah oleh Administrator.</p>
         </div>
@@ -641,6 +1020,7 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showJadwalModal, setShowJadwalModal] = useState(false);
   const [editingJadwal, setEditingJadwal] = useState<TeachingSchedule | null>(null);
+  const [showSessionDetail, setShowSessionDetail] = useState<{name: string, mapping: any[]} | null>(null);
 
   const printBarcode = (className: string) => {
     const win = window.open('', '_blank');
@@ -933,7 +1313,11 @@ export default function App() {
         })
         .map(t => {
           const schedules = teachingSchedules.filter(ts => ts.nip === t.nip && (rekapFilter.kelas ? ts.kelas === rekapFilter.kelas : true));
-          const totalTarget = schedules.reduce((sum, sch) => sum + sch.targetPertemuan, 0);
+          const [y, m] = rekapFilter.bulan.split('-').map(Number);
+          const totalTarget = schedules.reduce((sum, sch) => {
+            const occ = countDaysInMonth(y, m - 1, sch.hari, holidays);
+            return sum + (occ * (Number(sch.targetPertemuan) || 0));
+          }, 0);
           const monthAtts = teacherAttendance.filter(ta => ta.nip === t.nip && (rekapFilter.kelas ? ta.kelas === rekapFilter.kelas : true) && ta.tanggal.startsWith(rekapFilter.bulan));
           const actual = monthAtts.length;
           const totalLambat = monthAtts.reduce((sum, a) => sum + (a.terlambat || 0), 0);
@@ -980,7 +1364,11 @@ export default function App() {
         })
         .map(t => {
           const schs = teachingSchedules.filter(ts => ts.nip === t.nip && (rekapFilter.kelas ? ts.kelas === rekapFilter.kelas : true));
-          const tgt = schs.reduce((sum, sch) => sum + sch.targetPertemuan, 0);
+          const [y, m] = rekapFilter.bulan.split('-').map(Number);
+          const tgt = schs.reduce((sum, sch) => {
+            const occ = countDaysInMonth(y, m - 1, sch.hari, holidays);
+            return sum + (occ * (Number(sch.targetPertemuan) || 0));
+          }, 0);
           const atts = teacherAttendance.filter(ta => ta.nip === t.nip && (rekapFilter.kelas ? ta.kelas === rekapFilter.kelas : true) && ta.tanggal.startsWith(rekapFilter.bulan));
           const act = atts.length;
           const lbt = atts.reduce((sum, a) => sum + (a.terlambat || 0), 0);
@@ -1306,10 +1694,13 @@ export default function App() {
       if (jabatan === 'Kamad') {
         items.push({ id: 'absensi-umum', label: 'Absensi Siswa', icon: ClipboardList });
         items.push({ id: 'absensi-guru', label: 'Absensi Guru', icon: User });
+        items.push({ id: 'capaian-guru', label: 'Laporan Capaian Guru', icon: Award });
         items.push({ id: 'analisis', label: 'Analisis Kehadiran', icon: BarChart3 });
       } else if (jabatan === 'Wakamad') {
         items.push({ id: 'absensi-umum', label: 'Absensi Siswa', icon: ClipboardList });
         items.push({ id: 'absensi-guru', label: 'Absensi Guru', icon: User });
+        items.push({ id: 'roster', label: 'Roster Mengajar', icon: TableIcon });
+        items.push({ id: 'profil-siswa', label: 'Profil Siswa', icon: GraduationCap });
         items.push({ id: 'rekap', label: 'Laporan Rekap', icon: FileBarChart });
         items.push({ id: 'rekap-mapel', label: 'Rekap Mapel', icon: ClipboardList });
         items.push({ id: 'analisis', label: 'Analisis Kehadiran', icon: BarChart3 });
@@ -1692,22 +2083,36 @@ export default function App() {
     </AnimatePresence>
   );
 
-  const [teachingSelectedClasses, setTeachingSelectedClasses] = useState<{[key: string]: number}>({});
+  const [teachingSessions, setTeachingSessions] = useState<{kelas: string, hari: string, target: number}[]>([]);
 
   const handleSaveJadwal = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingJadwal?.nip) return;
     toggleLoader(true);
     try {
+      // Cleanup existing schedules for this specific teacher, mapel, and class
+      // to avoid duplicates if days are changed.
+      const teacherSchedules = teachingSchedules.filter(ts => 
+        ts.nip === editingJadwal.nip && 
+        ts.mapel === editingJadwal.mapel && 
+        ts.kelas === editingJadwal.kelas
+      );
+      for (const old of teacherSchedules) {
+        await firestoreService.hapusJadwalMengajar(old.id);
+      }
+
       const g = teachers.find(t => t.nip === editingJadwal.nip);
+      // Ensure all sessions have the correct class from editingJadwal
+      const finalSessions = teachingSessions.map(s => ({ ...s, kelas: editingJadwal.kelas || '' }));
+      
       await firestoreService.saveTeachingBatch(
         editingJadwal.nip, 
         g?.nama || '', 
-        teachingSelectedClasses, 
+        finalSessions, 
         editingJadwal.mapel || ''
       );
       setShowJadwalModal(false);
-      setTeachingSelectedClasses({});
+      setTeachingSessions([]);
       alert("Jadwal mengajar berhasil diperbarui!");
     } catch (e) {
       alert("Gagal menyimpan jadwal.");
@@ -1724,61 +2129,107 @@ export default function App() {
   };
 
   const renderProfilSiswa = () => {
+    const teacher = teachers.find(t => t.nip === session?.uid);
+    const jabatan = teacher?.jabatan || (session?.role === 'Admin' ? 'Wakamad' : 'Guru');
+    const isKamadWakamad = ['Kamad', 'Wakamad'].includes(jabatan) || session?.role === 'Admin';
+    
     const waliKelas = session?.kelas;
-    if (!waliKelas) return <div className="p-8 text-center text-gray-400">Akses Dibatasi. Anda bukan Wali Kelas.</div>;
+    
+    // Determine which students to show
+    let filteredStudents = [];
+    let title = "";
+    let description = "";
 
-    const myStudents = students.filter(s => s.kelas === waliKelas);
+    if (isKamadWakamad) {
+      filteredStudents = students.filter(s => studentProfileClassFilter ? s.kelas === studentProfileClassFilter : true);
+      title = studentProfileClassFilter ? `Profil Siswa Kelas ${studentProfileClassFilter}` : "Seluruh Profil Siswa";
+      description = "Melihat profil siswa untuk seluruh tingkatan/kelas.";
+    } else if (waliKelas) {
+      filteredStudents = students.filter(s => s.kelas === waliKelas);
+      title = `Profil Siswa Kelas ${waliKelas}`;
+      description = "Daftar siswa dalam perwakilan kelas Anda.";
+    } else {
+      return <div className="p-8 text-center text-gray-400">Akses Dibatasi. Anda bukan Wali Kelas atau Wakamad.</div>;
+    }
 
     return (
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6 pb-20">
-        <div className="flex justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 md:p-8 rounded-[2.5rem] shadow-sm border border-gray-100 gap-4">
            <div>
-              <h2 className="text-xl font-bold flex items-center gap-2">
-                 <GraduationCap className="text-green-700" /> Profil Siswa Kelas {waliKelas}
+              <h2 className="text-xl font-black flex items-center gap-2 uppercase tracking-tight">
+                 <GraduationCap className="text-green-700" size={24} /> {title}
               </h2>
-              <p className="text-xs text-gray-500 font-medium mt-1">Daftar siswa dalam perwakilan kelas Anda.</p>
+              <p className="text-xs text-gray-400 font-bold mt-1 uppercase tracking-widest">{description}</p>
            </div>
-           <div className="text-right">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Total Siswa</p>
-              <p className="text-2xl font-black text-green-700">{myStudents.length}</p>
+           
+           <div className="flex flex-wrap items-center gap-4 w-full md:w-auto">
+             {isKamadWakamad && (
+               <div className="flex items-center gap-2 bg-zinc-50 px-4 py-2 rounded-2xl border border-zinc-100">
+                  <TableIcon size={14} className="text-zinc-400" />
+                  <select 
+                    value={studentProfileClassFilter}
+                    onChange={e => setStudentProfileClassFilter(e.target.value)}
+                    className="bg-transparent border-0 text-xs font-black uppercase tracking-widest focus:ring-0 text-zinc-600"
+                  >
+                    <option value="">Semua Kelas</option>
+                    {classrooms.map(c => <option key={c.nama} value={c.nama}>{c.nama}</option>)}
+                  </select>
+               </div>
+             )}
+             <div className="text-right bg-green-50 px-6 py-2 rounded-2xl border border-green-100">
+                <p className="text-[9px] font-black text-green-600 uppercase tracking-widest mb-1">Total Tampil</p>
+                <p className="text-xl font-black text-green-800">{filteredStudents.length}</p>
+             </div>
            </div>
         </div>
 
-        <div className="bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden">
+        <div className="bg-white rounded-[2.5rem] shadow-xl border border-gray-100 overflow-hidden">
            <div className="overflow-x-auto">
              <table className="w-full text-left text-sm">
-                <thead className="bg-gray-50 text-gray-400 uppercase text-[10px] font-black tracking-widest border-b">
+                <thead className="bg-zinc-50 text-zinc-400 uppercase text-[10px] font-black tracking-widest border-b border-zinc-100">
                    <tr>
-                      <th className="px-6 py-4">Nama Siswa</th>
-                      <th className="px-6 py-4">Kelas</th>
-                      <th className="px-6 py-4 text-center">Aksi</th>
+                      <th className="px-8 py-5">Nama Siswa</th>
+                      <th className="px-8 py-5">NISN / Kelas</th>
+                      <th className="px-8 py-5 text-center">Aksi Pelayanan</th>
                    </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-50">
-                   {myStudents.map((s, idx) => (
-                      <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                         <td className="px-6 py-4">
-                            <div className="flex items-center gap-3">
-                               <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden border">
-                                  {s.foto ? <img src={s.foto} className="w-full h-full object-cover" /> : <User size={14} className="text-gray-400" />}
+                <tbody className="divide-y divide-zinc-50">
+                   {filteredStudents.map((s, idx) => (
+                      <tr key={idx} className="hover:bg-zinc-50 transition-colors group">
+                         <td className="px-8 py-5">
+                            <div className="flex items-center gap-4">
+                               <div className="w-10 h-10 rounded-2xl bg-zinc-100 flex items-center justify-center overflow-hidden border border-zinc-200 group-hover:border-green-300 transition-colors">
+                                  {s.foto ? <img src={s.foto} className="w-full h-full object-cover" /> : <User size={18} className="text-zinc-300" />}
                                </div>
-                               <span className="font-bold text-zinc-900">{s.nama}</span>
+                               <div>
+                                 <span className="font-black text-zinc-900 block leading-tight">{s.nama}</span>
+                                 <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">Status Aktif</span>
+                               </div>
                             </div>
                          </td>
-                         <td className="px-6 py-4 font-medium text-gray-500">{s.kelas}</td>
-                         <td className="px-6 py-4 text-center">
+                         <td className="px-8 py-5">
+                            <span className="font-bold text-zinc-500 block">{s.nisn}</span>
+                            <span className="text-[10px] font-black text-green-700 bg-green-50 px-2 py-0.5 rounded-lg uppercase tracking-widest">{s.kelas}</span>
+                         </td>
+                         <td className="px-8 py-5 text-center">
                             <button 
                                onClick={() => setSelectedStudentCard(s)}
-                               className="bg-green-50 text-green-700 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-green-100 transition-all"
+                               className="bg-zinc-900 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-green-700 transition-all shadow-lg hover:shadow-green-100 shadow-zinc-100"
                             >
-                               Lihat Profil
+                               Lihat Detail Profil
                             </button>
                          </td>
                       </tr>
                    ))}
-                   {myStudents.length === 0 && (
+                   {filteredStudents.length === 0 && (
                       <tr>
-                         <td colSpan={3} className="p-12 text-center text-gray-400 font-medium">Belum ada siswa di kelas ini.</td>
+                         <td colSpan={3} className="p-20 text-center text-zinc-300">
+                           <div className="max-w-xs mx-auto">
+                              <GraduationCap size={48} className="mx-auto mb-4 opacity-20" />
+                              <p className="font-bold uppercase tracking-widest text-[10px]">Data tidak ditemukan</p>
+                              <p className="text-xs font-medium mt-1">Belum ada siswa yang terdaftar di pilihan ini.</p>
+                           </div>
+                         </td>
                       </tr>
                    )}
                 </tbody>
@@ -1881,106 +2332,162 @@ export default function App() {
       {showJadwalModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowJadwalModal(false)} />
-          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
+          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden">
             <div className="bg-green-950 p-6 text-white text-center">
-              <h2 className="text-xl font-bold">Target Pertemuan Guru</h2>
+              <h2 className="text-xl font-bold">Konfigurasi Jam Mengajar</h2>
             </div>
-            <div className="p-8 space-y-4 max-h-[70vh] overflow-y-auto custom-scrollbar">
-              <div className="sticky top-0 bg-white z-10 pb-4 border-b space-y-4">
+            <div className="p-8 space-y-6 max-h-[75vh] overflow-y-auto custom-scrollbar">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Identitas Guru</label>
+                  <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Nama Guru</label>
                   <select 
                     required 
                     value={editingJadwal?.nip || ''} 
                     onChange={e => {
-                      const nip = e.target.value;
-                      setEditingJadwal({...(editingJadwal as TeachingSchedule), nip});
-                      // Initialize with current targets
-                      const current = teachingSchedules.filter(ts => ts.nip === nip);
-                      const sel: any = {};
-                      current.forEach(c => sel[c.kelas] = c.targetPertemuan);
-                      setTeachingSelectedClasses(sel);
+                      const t = teachers.find(tg => tg.nip === e.target.value);
+                      setEditingJadwal({...(editingJadwal as any), nip: e.target.value, namaGuru: t?.nama || ''});
                     }} 
-                    className="w-full bg-zinc-50 border-0 rounded-xl px-4 py-3 font-bold mt-1"
+                    className="w-full bg-zinc-50 border-0 rounded-xl px-4 py-3 font-bold mt-1 text-sm focus:ring-2 focus:ring-green-500"
                   >
                     <option value="">-- Pilih Guru --</option>
                     {teachers.map(t => <option key={t.nip} value={t.nip}>{t.nama}</option>)}
                   </select>
                 </div>
-
                 <div>
                   <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Mata Pelajaran</label>
                   <select 
                     required 
                     value={editingJadwal?.mapel || ''} 
-                    onChange={e => setEditingJadwal({...(editingJadwal as TeachingSchedule), mapel: e.target.value})} 
-                    className="w-full bg-zinc-50 border-0 rounded-xl px-4 py-3 font-bold mt-1"
+                    onChange={e => setEditingJadwal({...(editingJadwal as any), mapel: e.target.value})} 
+                    className="w-full bg-zinc-50 border-0 rounded-xl px-4 py-3 font-bold mt-1 text-sm focus:ring-2 focus:ring-green-500"
                   >
-                    <option value="">-- Pilih Mata Pelajaran --</option>
+                    <option value="">-- Pilih Mapel --</option>
                     {(appConfig.subjects || []).map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Kelas</label>
+                  <select 
+                    required 
+                    value={editingJadwal?.kelas || ''} 
+                    onChange={e => setEditingJadwal({...(editingJadwal as any), kelas: e.target.value})} 
+                    className="w-full bg-zinc-50 border-0 rounded-xl px-4 py-3 font-bold mt-1 text-sm focus:ring-2 focus:ring-green-500"
+                  >
+                    <option value="">-- Pilih Kelas --</option>
+                    {classrooms.map(c => <option key={c.nama} value={c.nama}>{c.nama}</option>)}
                   </select>
                 </div>
               </div>
 
               <div>
-                <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1 block mb-3">Ceklis Kelas & Atur Target</label>
+                <div className="flex justify-between items-center mb-3">
+                  <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Sesi Mengajar (Hari & Target)</label>
+                  <button 
+                    onClick={() => setTeachingSessions([...teachingSessions, { kelas: editingJadwal?.kelas || '', hari: 'Senin', target: 2 }])}
+                    className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-1 hover:text-blue-800 transition-colors"
+                  >
+                    <Plus size={10} /> Tambah Hari
+                  </button>
+                </div>
+                
                 <div className="space-y-3">
-                  {classrooms.map(c => {
-                    const isChecked = !!teachingSelectedClasses[c.nama];
-                    const targetVal = teachingSelectedClasses[c.nama] || 4;
-                    
-                    return (
-                      <div key={c.nama} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-100">
-                        <div className="flex items-center gap-3">
-                          <input 
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => {
-                              const newSel = {...teachingSelectedClasses};
-                              if (isChecked) {
-                                delete newSel[c.nama];
-                              } else {
-                                newSel[c.nama] = 4;
-                              }
-                              setTeachingSelectedClasses(newSel);
-                            }}
-                            className="w-5 h-5 rounded border-gray-300 text-green-600 focus:ring-green-500"
-                          />
-                          <span className="font-bold text-sm text-gray-700">{c.nama}</span>
-                        </div>
-                        {isChecked && (
-                          <div className="flex items-center gap-2">
-                             <span className="text-[9px] font-bold text-gray-400 uppercase">Target:</span>
-                             <input 
-                               type="number"
-                               min={1}
-                               value={targetVal}
-                               onChange={(e) => {
-                                 setTeachingSelectedClasses({...teachingSelectedClasses, [c.nama]: parseInt(e.target.value)});
-                               }}
-                               className="w-16 bg-white border border-gray-200 rounded-lg px-2 py-1 text-center font-bold text-sm"
-                             />
-                          </div>
-                        )}
-                        {!isChecked && teachingSchedules.some(ts => ts.nip === editingJadwal?.nip && ts.kelas === c.nama) && (
-                           <div className="text-[9px] font-bold text-green-400 bg-green-50 px-2 py-1 rounded">Terdaftar</div>
-                        )}
+                  {teachingSessions.length === 0 && (
+                    <div className="text-center py-6 border-2 border-dashed border-gray-100 rounded-2xl text-gray-400 text-xs italic">
+                      Belum ada hari mengajar ditambahkan.
+                    </div>
+                  )}
+                  {teachingSessions.map((session, idx) => (
+                    <div key={idx} className="bg-gray-50 p-4 rounded-2xl border border-gray-100 flex items-center gap-4 relative group">
+                      <div className="flex-1">
+                        <label className="text-[9px] font-black text-gray-400 uppercase mb-1 ml-1 block">Hari</label>
+                        <select 
+                          value={session.hari} 
+                          onChange={e => {
+                            const newSess = [...teachingSessions];
+                            newSess[idx].hari = e.target.value;
+                            setTeachingSessions(newSess);
+                          }}
+                          className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs font-bold focus:ring-1 focus:ring-green-500"
+                        >
+                          {["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"].map(h => <option key={h} value={h}>{h}</option>)}
+                        </select>
                       </div>
-                    );
-                  })}
+                      <div className="w-32">
+                        <label className="text-[9px] font-black text-gray-400 uppercase mb-1 ml-1 block">Sesi/Jam</label>
+                        <input 
+                          type="number" 
+                          min={1}
+                          value={session.target}
+                          onChange={e => {
+                            const newSess = [...teachingSessions];
+                            newSess[idx].target = parseInt(e.target.value);
+                            setTeachingSessions(newSess);
+                          }}
+                          className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs font-bold focus:ring-1 focus:ring-green-500"
+                        />
+                      </div>
+                      <button 
+                        onClick={() => setTeachingSessions(teachingSessions.filter((_, i) => i !== idx))}
+                        className="text-red-400 hover:text-red-600 transition-colors pt-4"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
                 </div>
               </div>
+            </div>
 
-              <div className="pt-4 flex gap-3 sticky bottom-0 bg-white py-4 border-t">
-                <button type="button" onClick={() => setShowJadwalModal(false)} className="flex-1 py-4 font-bold text-zinc-400">Batal</button>
-                <button 
-                  onClick={handleSaveJadwal}
-                  disabled={!editingJadwal?.nip || Object.keys(teachingSelectedClasses).length === 0}
-                  className="flex-1 bg-green-900 text-white rounded-2xl py-4 font-bold shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Simpan Target ({Object.keys(teachingSelectedClasses).length})
-                </button>
+            <div className="pt-4 flex gap-3 sticky bottom-0 bg-white py-4 border-t">
+              <button type="button" onClick={() => setShowJadwalModal(false)} className="flex-1 py-4 font-bold text-zinc-400">Batal</button>
+              <button 
+                onClick={handleSaveJadwal}
+                disabled={!editingJadwal?.nip || !editingJadwal?.mapel || !editingJadwal?.kelas || teachingSessions.length === 0}
+                className="flex-1 bg-green-900 text-white rounded-2xl py-4 font-bold shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Simpan Konfigurasi
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+
+  const renderSessionDetailModal = () => (
+    <AnimatePresence>
+      {showSessionDetail && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowSessionDetail(null)} />
+          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl overflow-hidden border border-gray-100">
+            <div className="bg-green-100 p-8 text-center">
+              <div className="bg-white w-16 h-16 rounded-3xl flex items-center justify-center mx-auto mb-4 shadow-sm">
+                <School className="text-green-800" size={32} />
               </div>
+              <h2 className="text-lg font-black text-green-950 uppercase tracking-tight">{showSessionDetail.name}</h2>
+              <p className="text-xs font-bold text-green-700/60 uppercase tracking-widest mt-1">Detail Jadwal Mengajar</p>
+            </div>
+            <div className="p-8">
+              <div className="space-y-4">
+                {showSessionDetail.mapping.map((s, idx) => (
+                  <div key={idx} className="bg-gray-50 p-4 rounded-2xl border border-gray-100 flex justify-between items-center">
+                    <div>
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">{s.kelas}</p>
+                      <p className="font-bold text-sm text-gray-900">{s.hari}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Target</p>
+                      <p className="font-black text-green-800 text-sm">{s.targetPertemuan} Sesi</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <button 
+                onClick={() => setShowSessionDetail(null)}
+                className="w-full bg-zinc-900 text-white rounded-2xl py-4 font-black text-xs uppercase tracking-widest mt-8 shadow-xl shadow-zinc-200 hover:bg-black transition-all"
+              >
+                Tutup Detail
+              </button>
             </div>
           </motion.div>
         </div>
@@ -2595,7 +3102,7 @@ export default function App() {
 
                 {/* Teacher Attendance Analysis */}
                 <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 min-h-[400px]">
-                   <h3 className="text-sm font-black text-blue-900 uppercase tracking-widest mb-6">Analisis Kehadiran Guru Per Kelas</h3>
+                   <h3 className="text-sm font-black text-blue-900 uppercase tracking-widest mb-6">Analisis Kehadiran Guru</h3>
                    <div className="h-64 relative">
                       {teachers.length > 0 ? (
                         <ResponsiveContainer width="100%" height="100%">
@@ -2605,8 +3112,14 @@ export default function App() {
                              return scheds.some(s => s.kelas === analysisClass);
                            }).map(t => {
                              const schedules = (teachingSchedules || []).filter(ts => ts.nip === t.nip && (analysisClass ? ts.kelas === analysisClass : true));
-                             const currentMonth = new Date().toISOString().slice(0, 7);
-                             const totalTarget = schedules.reduce((sum, s) => sum + (Number(s.targetPertemuan) || 0), 0);
+                             const now = new Date();
+                             const year = now.getFullYear();
+                             const month = now.getMonth();
+                             const totalTarget = (schedules || []).reduce((sum, s) => {
+                               const occ = countDaysInMonth(year, month, s.hari, holidays);
+                               return sum + (occ * (Number(s.targetPertemuan) || 0));
+                             }, 0);
+                             const currentMonth = now.toISOString().slice(0, 7);
                              const actual = (teacherAttendance || []).filter(ta => ta.nip === t.nip && (analysisClass ? ta.kelas === analysisClass : true) && ta.tanggal.startsWith(currentMonth)).length;
                              return {
                                name: (t.nama || 'Guru').split(' ')[0],
@@ -2633,8 +3146,14 @@ export default function App() {
                            return scheds.some(s => s.kelas === analysisClass);
                         }).map(t => {
                           const schedules = (teachingSchedules || []).filter(ts => ts.nip === t.nip && (analysisClass ? ts.kelas === analysisClass : true));
-                          const totalTarget = schedules.reduce((sum, s) => sum + (Number(s.targetPertemuan) || 0), 0);
-                          const currentMonth = new Date().toISOString().slice(0, 7);
+                          const now = new Date();
+                          const year = now.getFullYear();
+                          const month = now.getMonth();
+                          const totalTarget = (schedules || []).reduce((sum, s) => {
+                            const occ = countDaysInMonth(year, month, s.hari, holidays);
+                            return sum + (occ * (Number(s.targetPertemuan) || 0));
+                          }, 0);
+                          const currentMonth = now.toISOString().slice(0, 7);
                           const actual = (teacherAttendance || []).filter(ta => ta.nip === t.nip && (analysisClass ? ta.kelas === analysisClass : true) && ta.tanggal.startsWith(currentMonth)).length;
                           const perc = totalTarget > 0 ? (actual / totalTarget) * 100 : 0;
                           if (perc < 50 && totalTarget > 0) {
@@ -2657,7 +3176,10 @@ export default function App() {
           {activePanel === 'jadwal-mengajar' && (
             <motion.div key="jadwal-mengajar" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
               <div className="mb-4 flex flex-wrap gap-3 justify-between items-center">
-                <h2 className="text-sm font-black text-zinc-900 uppercase tracking-widest">Manajemen Target Pertemuan Guru</h2>
+                <div className="flex flex-col">
+                   <h2 className="text-sm font-black text-zinc-900 uppercase tracking-widest">Manajemen Jam Mengajar Guru</h2>
+                   <p className="text-[10px] font-bold text-gray-400">Target otomatis terisi berdasarkan hari mengajar di bulan berjalan</p>
+                </div>
                 <div className="flex gap-2">
                   <select 
                     value={pageSize} 
@@ -2667,10 +3189,10 @@ export default function App() {
                     {[10, 20, 50, 100].map(v => <option key={v} value={v}>Tampil {v}</option>)}
                   </select>
                   <button 
-                    onClick={() => { setEditingJadwal({ id: '', nip: '', namaGuru: '', kelas: '', targetPertemuan: 8 }); setShowJadwalModal(true); }}
+                    onClick={() => { setEditingJadwal({ id: '', nip: '', namaGuru: '', kelas: '', hari: '', targetPertemuan: 2 } as any); setTeachingSessions([]); setShowJadwalModal(true); }}
                     className="bg-green-800 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm"
                   >
-                    <Plus size={14} /> Tambah Target
+                    <Plus size={14} /> Tambah Jam Mengajar
                   </button>
                 </div>
               </div>
@@ -2679,37 +3201,94 @@ export default function App() {
                   <table className="w-full text-left text-sm">
                     <thead className="bg-gray-50 text-gray-400 uppercase text-[10px] font-black tracking-widest border-b border-gray-100">
                     <tr>
-                      <th className="px-6 py-4 text-center w-12">No</th>
+                      <th className="px-6 py-4 text-center w-12 text-nowrap">No</th>
                       <th className="px-6 py-4">Guru</th>
+                      <th className="px-6 py-4">Mapel</th>
                       <th className="px-6 py-4">Kelas</th>
-                      <th className="px-6 py-4">Target / Bulan</th>
+                      <th className="px-6 py-4">Total Target / Bln</th>
                       <th className="px-6 py-4 text-center">Aksi</th>
                     </tr>
                   </thead>
                     <tbody className="divide-y divide-gray-50">
-                    {teachingSchedules.slice(pagination.jadwal, pagination.jadwal + pageSize).map((s, i) => (
-                      <tr key={i}>
-                        <td className="px-6 py-4 text-center font-bold text-gray-400 text-xs">{pagination.jadwal + i + 1}</td>
-                        <td className="px-6 py-4 font-bold">{s.namaGuru}</td>
-                        <td className="px-6 py-4 font-medium text-gray-600">{s.mapel || '-'}</td>
-                        <td className="px-6 py-4 font-medium">{s.kelas}</td>
-                        <td className="px-6 py-4 font-black">{s.targetPertemuan} Sesi</td>
-                        <td className="px-6 py-4 text-center">
-                          <div className="flex justify-center gap-2">
-                             <button onClick={() => { setEditingJadwal(s); setShowJadwalModal(true); }} className="text-blue-500"><Edit size={16} /></button>
-                             <button onClick={() => { 
-                               setConfirmModal({
-                                 show: true,
-                                 title: 'Hapus Target?',
-                                 message: 'Target pertemuan guru di kelas ini akan dihapus.',
-                                 entityName: `${s.namaGuru} - ${s.kelas}`,
-                                 onConfirm: () => firestoreService.hapusJadwalMengajar(s.id)
-                               });
-                             }} className="text-red-500 hover:text-red-800"><Trash2 size={16} /></button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {(() => {
+                      const now = new Date();
+                      const year = now.getFullYear();
+                      const month = now.getMonth();
+                      
+                      const groups: any = {};
+                      teachingSchedules.forEach(s => {
+                        const key = `${s.nip}-${s.mapel || 'N/A'}-${s.kelas}`;
+                        if (!groups[key]) {
+                          groups[key] = {
+                            nip: s.nip,
+                            namaGuru: s.namaGuru,
+                            mapel: s.mapel,
+                            kelas: s.kelas,
+                            sessions: []
+                          };
+                        }
+                        groups[key].sessions.push(s);
+                      });
+                      
+                      const groupedArr = Object.values(groups);
+                      
+                      return groupedArr.slice(pagination.jadwal, pagination.jadwal + pageSize).map((g: any, i) => {
+                        const totalTarget = g.sessions.reduce((sum: number, s: any) => {
+                          const occ = countDaysInMonth(year, month, s.hari, holidays);
+                          return sum + (occ * (Number(s.targetPertemuan) || 0));
+                        }, 0);
+
+                        return (
+                          <tr key={i}>
+                            <td className="px-6 py-4 text-center font-bold text-gray-400 text-xs">{pagination.jadwal + i + 1}</td>
+                            <td className="px-6 py-4">
+                               <p className="font-bold">{g.namaGuru}</p>
+                               <p className="text-[9px] font-mono font-bold text-gray-400 uppercase">{g.nip}</p>
+                            </td>
+                            <td className="px-6 py-4 font-bold text-green-950 text-xs">{g.mapel || '-'}</td>
+                            <td className="px-6 py-4">
+                               <div className="flex flex-col gap-1">
+                                  <span className="font-bold">{g.kelas}</span>
+                                  <button 
+                                    onClick={() => setShowSessionDetail({ name: g.namaGuru, mapping: g.sessions })}
+                                    className="text-[9px] font-black text-blue-600 underline uppercase tracking-tighter text-left"
+                                  >
+                                    Mengajar di
+                                  </button>
+                               </div>
+                            </td>
+                            <td className="px-6 py-4">
+                               <div className="flex flex-col">
+                                  <span className="font-black text-green-900">{totalTarget} Pertemuan</span>
+                                  <span className="text-[9px] font-bold text-gray-400 italic">Bulan Ini ({new Date().toLocaleDateString('id-ID', { month: 'long' })})</span>
+                               </div>
+                            </td>
+                            <td className="px-6 py-4 text-center text-nowrap">
+                              <div className="flex justify-center gap-3">
+                                 <button onClick={() => { 
+                                   setEditingJadwal({ nip: g.nip, namaGuru: g.namaGuru, mapel: g.mapel } as any); 
+                                   setTeachingSessions(g.sessions.map((s: any) => ({ kelas: s.kelas, hari: s.hari, target: s.targetPertemuan })));
+                                   setShowJadwalModal(true); 
+                                 }} className="text-blue-500 hover:bg-blue-50 p-2 rounded-lg transition-all"><Edit size={16} /></button>
+                                 <button onClick={() => { 
+                                   setConfirmModal({
+                                     show: true,
+                                     title: 'Hapus Jam Mengajar?',
+                                     message: 'Seluruh jam mengajar guru untuk mapel ini di kelas ini akan dihapus.',
+                                     entityName: `${g.namaGuru} - ${g.kelas} (${g.mapel})`,
+                                     onConfirm: async () => {
+                                       for (const s of g.sessions) {
+                                         await firestoreService.hapusJadwalMengajar(s.id);
+                                       }
+                                     }
+                                   });
+                                 }} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-all"><Trash2 size={16} /></button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
                   </tbody>
                 </table>
               </div>
@@ -3662,6 +4241,10 @@ export default function App() {
 
           {activePanel === 'profil' && renderProfile()}
 
+          {activePanel === 'capaian-guru' && renderLaporanCapaianGuru()}
+
+          {activePanel === 'roster' && renderRoster()}
+
           {activePanel === 'profil-siswa' && renderProfilSiswa()}
 
           {activePanel === 'rekap' && (
@@ -3780,17 +4363,31 @@ export default function App() {
                           })
                       ) : (
                         teachers
+                          .filter(t => {
+                            if (rekapFilter.kelas) {
+                              return teachingSchedules.some(ts => ts.nip === t.nip && ts.kelas === rekapFilter.kelas);
+                            }
+                            return true;
+                          })
                           .map((t, i) => {
-                            const schedules = teachingSchedules.filter(ts => ts.nip === t.nip);
-                            const totalTarget = schedules.reduce((sum, sch) => sum + sch.targetPertemuan, 0);
-                            const actual = (teacherAttendanceMap[t.nip] || []).length;
+                            const schedules = teachingSchedules.filter(ts => ts.nip === t.nip && (rekapFilter.kelas ? ts.kelas === rekapFilter.kelas : true));
+                            const [y, m] = rekapFilter.bulan.split('-').map(Number);
+                            const totalTarget = schedules.reduce((sum, sch) => {
+                              const occ = countDaysInMonth(y, m - 1, sch.hari, holidays);
+                              return sum + (occ * (Number(sch.targetPertemuan) || 0));
+                            }, 0);
+                            const actual = (teacherAttendanceMap[t.nip] || [])
+                              .filter(ta => rekapFilter.kelas ? ta.kelas === rekapFilter.kelas : true)
+                              .length;
                             const perc = totalTarget > 0 ? Math.round((actual / totalTarget) * 100) : 0;
                             
                             return (
                               <tr key={i} className="hover:bg-gray-50 transition-colors">
                                 <td className="px-6 py-4 font-bold">{t.nama}</td>
                                 <td className="px-6 py-4 text-center text-[10px] font-black uppercase text-gray-400">{t.jabatan || 'Guru'}</td>
-                                <td className="px-6 py-4 text-center text-[10px] font-black uppercase text-gray-400">{schedules.map(s => s.kelas).join(', ') || '-'}</td>
+                                <td className="px-6 py-4 text-center text-[10px] font-black uppercase text-gray-400">
+                                  {rekapFilter.kelas ? rekapFilter.kelas : (schedules.map(s => s.kelas).join(', ') || '-')}
+                                </td>
                                 <td className="px-6 py-4 text-center font-bold">{totalTarget}</td>
                                 <td className="px-6 py-4 text-center font-bold text-blue-600">{actual}</td>
                                 <td className="px-6 py-4 text-center">
@@ -4586,6 +5183,7 @@ export default function App() {
           })()}
 
         </AnimatePresence>
+        {renderSessionDetailModal()}
         <ConfirmModal />
       </main>
     </div>
