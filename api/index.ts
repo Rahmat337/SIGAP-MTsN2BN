@@ -43,62 +43,34 @@ app.get("/api/health", (req, res) => {
 });
 
 // Production static file serving
-const possibleDistPaths = [
-  path.resolve(process.cwd(), "dist"),
-  path.resolve(__dirname, "dist"),
-  path.resolve(__dirname, "..", "dist"),
-  path.resolve("/", "var", "task", "dist"), // Typical Vercel lambda path
+const possiblePaths = [
+  path.join(process.cwd(), 'dist'),
+  path.join(__dirname, 'dist'),
+  path.join(__dirname, '../dist'),
+  path.resolve(process.cwd(), '..', 'dist'),
 ];
 
-let distPath = possibleDistPaths[0];
-for (const p of possibleDistPaths) {
-  try {
-    if (fs.existsSync(p)) {
-      distPath = p;
-      console.log(`[Server] Found dist at: ${distPath}`);
-      break;
-    }
-  } catch (e) {
-    // Ignore permissions errors during lookup
+let distPath = possiblePaths[0];
+for (const p of possiblePaths) {
+  const resolvedPath = path.resolve(p);
+  if (fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isDirectory()) {
+    distPath = resolvedPath;
+    break;
   }
 }
 
-if (process.env.NODE_ENV === "production" || process.env.VERCEL) {
-  console.log(`Serving static files from: ${distPath}`);
-  app.use(express.static(distPath));
-}
-
-// Vite middleware for development
-if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
-  (async () => {
-    const { createServer: createViteServer } = await import("vite");
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  })();
-}
+app.use(express.static(distPath));
 
 // Catch-all route for SPA fallback
 app.get("*", (req, res, next) => {
   // Skip API routes
   if (req.path.startsWith("/api/")) return next();
   
-  // Safeguard: If it's a request for an asset but wasn't found by express.static, 
-  // don't send index.html (which causes MIME type errors)
-  const isAsset = /\.(js|css|png|jpg|jpeg|gif|svg|ico|json|woff|woff2|ttf|otf)$/.test(req.path);
-  if (isAsset) {
-    res.setHeader("Content-Type", "text/plain");
-    return res.status(404).send("Asset not found");
-  }
-  
-  if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) return next();
-
   const indexPath = path.join(distPath, "index.html");
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
+    console.error("Index file not found in " + distPath);
     res.status(404).send("Application files not found. Please ensure the build completed successfully.");
   }
 });
