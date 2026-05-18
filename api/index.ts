@@ -41,19 +41,27 @@ async function startServer() {
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else if (!process.env.VERCEL) {
+  } else {
+    // Production static file serving
     const distPath = path.join(process.cwd(), 'dist');
+    console.log(`Serving static files from: ${distPath}`);
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    
+    // Catch-all route for SPA
+    app.get('*', (req, res, next) => {
+      // Skip API routes
+      if (req.path.startsWith('/api/')) return next();
+      
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
-  if ((process.env.NODE_ENV !== "production" || !process.env.VERCEL) && process.env.NODE_ENV !== "test") {
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on http://localhost:${PORT}`);
-    });
-  }
+  // Use PORT from environment or default to 3000
+  const portToListen = process.env.PORT ? parseInt(process.env.PORT) : PORT;
+
+  app.listen(portToListen, "0.0.0.0", () => {
+    console.log(`Server running on port ${portToListen} in ${process.env.NODE_ENV || 'development'} mode`);
+  });
 }
 
 startServer();
