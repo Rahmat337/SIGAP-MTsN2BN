@@ -16,7 +16,7 @@ import {
   ArrowLeft, Upload, FileSpreadsheet, BarChart3, Info, CheckCircle2, XCircle, AlertTriangle,
   Maximize2, CreditCard, Award, ExternalLink, ShieldCheck, Sparkles
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { firestoreService } from './services/firestoreService';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
@@ -31,6 +31,9 @@ import {
   UserSession, Student, Teacher, Classroom, Attendance, DashboardStats, 
   Holiday, DaySetting, TeacherAttendance, AppConfig, TeachingSchedule
 } from './types';
+import { auth, db } from './firebase';
+import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy } from 'firebase/firestore';
+import { handleFirestoreError, OperationType } from './lib/firebaseUtils';
 
 const formatIndoDate = (dateStr: string) => {
   if (!dateStr) return '-';
@@ -112,9 +115,6 @@ const AttendanceChart = ({ data }: { data: any[] }) => (
   </div>
 );
 
-import { auth, db } from './firebase';
-import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from './lib/firebaseUtils';
 
 const formatMinutes = (minutes: number) => {
   if (minutes <= 0) return 'Tepat Waktu';
