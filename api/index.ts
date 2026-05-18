@@ -1,7 +1,11 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import { fileURLToPath } from "url";
 import { GoogleGenAI } from "@google/genai";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 3000;
@@ -39,9 +43,28 @@ app.get("/api/health", (req, res) => {
 });
 
 // Production static file serving
-const distPath = path.join(process.cwd(), "dist");
+const possibleDistPaths = [
+  path.resolve(process.cwd(), "dist"),
+  path.resolve(__dirname, "dist"),
+  path.resolve(__dirname, "..", "dist"),
+  path.resolve("/", "var", "task", "dist"), // Typical Vercel lambda path
+];
+
+let distPath = possibleDistPaths[0];
+for (const p of possibleDistPaths) {
+  try {
+    if (fs.existsSync(p)) {
+      distPath = p;
+      console.log(`[Server] Found dist at: ${distPath}`);
+      break;
+    }
+  } catch (e) {
+    // Ignore permissions errors during lookup
+  }
+}
 
 if (process.env.NODE_ENV === "production" || process.env.VERCEL) {
+  console.log(`Serving static files from: ${distPath}`);
   app.use(express.static(distPath));
 }
 
@@ -62,20 +85,21 @@ app.get("*", (req, res, next) => {
   // Skip API routes
   if (req.path.startsWith("/api/")) return next();
   
-  // In dev mode without middleware (should not happen usually) skip
+  // Safeguard: If it's a request for an asset but wasn't found by express.static, 
+  // don't send index.html (which causes MIME type errors)
+  const isAsset = /\.(js|css|png|jpg|jpeg|gif|svg|ico|json|woff|woff2|ttf|otf)$/.test(req.path);
+  if (isAsset) {
+    res.setHeader("Content-Type", "text/plain");
+    return res.status(404).send("Asset not found");
+  }
+  
   if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) return next();
 
   const indexPath = path.join(distPath, "index.html");
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
-    // If we are on Vercel, we might need a relative path check
-    const altPath = path.join(__dirname, "../dist/index.html");
-    if (fs.existsSync(altPath)) {
-      res.sendFile(altPath);
-    } else {
-      next();
-    }
+    res.status(404).send("Application files not found. Please ensure the build completed successfully.");
   }
 });
 
