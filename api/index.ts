@@ -30,40 +30,26 @@ app.post("/api/action", async (req, res) => {
   }
 });
 
-async function startServer() {
-  const PORT = 3000;
-
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+// Vite middleware for development - only used locally or in AIS dev mode
+if (process.env.NODE_ENV !== "production") {
+  (async () => {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else {
-    // Production static file serving
-    const distPath = path.join(process.cwd(), 'dist');
-    console.log(`Serving static files from: ${distPath}`);
-    app.use(express.static(distPath));
-    
-    // Catch-all route for SPA
-    app.get('*', (req, res, next) => {
-      // Skip API routes
-      if (req.path.startsWith('/api/')) return next();
-      
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
+  })();
+}
 
-  // Use PORT from environment or default to 3000
-  const portToListen = process.env.PORT ? parseInt(process.env.PORT) : PORT;
+// Port listener - redundant on Vercel but needed for local/AIS
+const PORT = 3000;
+const portToListen = process.env.PORT ? parseInt(process.env.PORT) : PORT;
 
+if (process.env.NODE_ENV !== "test" && !process.env.VERCEL) {
   app.listen(portToListen, "0.0.0.0", () => {
     console.log(`Server running on port ${portToListen} in ${process.env.NODE_ENV || 'development'} mode`);
   });
 }
-
-startServer();
 
 export default app;
